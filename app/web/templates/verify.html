@@ -63,6 +63,11 @@
     <button id="otp-verify">Valider le code</button>
   </section>
 
+  <section id="final" hidden>
+    <h2>Verification terminee</h2>
+    <p id="final-message"></p>
+  </section>
+
   <section>
     <h2>Etat de la verification</h2>
     <ul class="checks" id="checks"></ul>
@@ -79,6 +84,13 @@ const headers = { Authorization: `Bearer ${token}` };
 const $ = (id) => document.getElementById(id);
 
 let steps = [];
+
+const TERMINAL = {
+  VERIFIED: "Votre identite est verifiee. Vous pouvez revenir a l'application.",
+  REJECTED: "La verification n'a pas abouti. Rapprochez-vous de votre conseiller.",
+  REVIEW: "Votre dossier est en cours de revue manuelle. Vous serez recontacte.",
+  EXPIRED: "Cette session de verification a expire. Demandez-en une nouvelle.",
+};
 
 function showError(message) { $("error").textContent = message || ""; }
 
@@ -97,8 +109,15 @@ function renderChecks(checks, status) {
   $("status").className = status;
 }
 
-function refreshVisibility(checks) {
+function refreshVisibility(checks, status) {
   const done = (name) => checks[name] && checks[name] !== "PENDING";
+  const finalMessage = TERMINAL[status];
+  $("final").hidden = !finalMessage;
+  if (finalMessage) {
+    $("final-message").textContent = finalMessage;
+    for (const step of ["step-document", "step-selfie", "step-otp"]) $(step).hidden = true;
+    return;
+  }
   $("step-document").hidden = done("DOCUMENT_VERIFICATION");
   $("step-selfie").hidden = !steps.includes("LIVENESS") || !done("DOCUMENT_VERIFICATION") || done("LIVENESS");
   $("step-otp").hidden = !steps.includes("OTP") || done("OTP")
@@ -107,7 +126,7 @@ function refreshVisibility(checks) {
 
 function update(state) {
   renderChecks(state.checks, state.status);
-  refreshVisibility(state.checks);
+  refreshVisibility(state.checks, state.status);
 }
 
 async function bootstrap() {
