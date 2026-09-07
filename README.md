@@ -51,7 +51,7 @@ uvicorn app.main:app --reload
 
 Documentation interactive : http://localhost:8000/docs — santé : `GET /health`.
 
-Avec Docker (PostgreSQL, Redis, MinIO, API, worker Celery) :
+Avec Docker (PostgreSQL, Redis, MinIO, API, workers Celery `cpu` et `gpu`) :
 
 ```bash
 cp .env.example .env

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
@@ -22,6 +23,17 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _log_gpu_task(name: str, session: KycSession, started: float) -> None:
+    """Per-task inference time feeds the cost-per-KYC KPI."""
+    logger.info(
+        "gpu_task=%s tenant=%s session=%s duration_ms=%.1f",
+        name,
+        session.tenant_id,
+        session.id,
+        (time.perf_counter() - started) * 1000,
+    )
+
+
 @celery_app.task(name="ekyc.process_document")
 def process_document(document_id: str) -> str:
     with db_session() as db:
@@ -32,7 +44,9 @@ def process_document(document_id: str) -> str:
         artifact = db.get(Artifact, document.artifact_id)
         if session is None or artifact is None:
             return "MISSING_SESSION"
+        started = time.perf_counter()
         identity.process_document(db, session, document, read_artifact(artifact))
+        _log_gpu_task("process_document", session, started)
         return str(kyc.evaluate(db, session))
 
 
@@ -43,7 +57,9 @@ def process_selfie(session_id: str, artifact_id: str) -> str:
         artifact = db.get(Artifact, artifact_id)
         if session is None or artifact is None:
             return "MISSING_SESSION"
+        started = time.perf_counter()
         biometrics.process_selfie(db, session, read_artifact(artifact))
+        _log_gpu_task("process_selfie", session, started)
         return str(kyc.evaluate(db, session))
 
 
