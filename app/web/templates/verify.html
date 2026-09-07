@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verification d'identite</title>
+  <style>
+    :root { --brand: #0b5fff; --ok: #0a8f4d; --ko: #c62828; --bg: #f5f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: #16181d; }
+    main { max-width: 560px; margin: 0 auto; padding: 24px 16px 64px; }
+    header { background: var(--brand); color: #fff; padding: 20px 16px; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+    section { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    section[hidden] { display: none; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
+    label { display: block; font-size: 13px; margin-bottom: 6px; color: #4a4f5a; }
+    input, select, button { width: 100%; padding: 11px; font-size: 15px; border-radius: 8px; border: 1px solid #d3d7e0; margin-bottom: 10px; }
+    button { background: var(--brand); color: #fff; border: none; font-weight: 600; cursor: pointer; }
+    button[disabled] { opacity: .5; cursor: progress; }
+    ul.checks { list-style: none; padding: 0; margin: 0; }
+    ul.checks li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #eef0f5; font-size: 14px; }
+    .PASSED { color: var(--ok); font-weight: 600; }
+    .FAILED { color: var(--ko); font-weight: 600; }
+    .PENDING, .REVIEW { color: #b26a00; font-weight: 600; }
+    .status { font-size: 16px; font-weight: 700; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .error { color: var(--ko); font-size: 13px; min-height: 18px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1 id="flow-label">Verification d'identite</h1>
+  <p>IT-TECH eKYC &middot; <span id="session-id">{{ session_id }}</span></p>
+</header>
+
+<main>
+  <p class="error" id="error"></p>
+
+  <section id="step-document">
+    <h2>1. Document d'identite</h2>
+    <label for="document-type">Type de document</label>
+    <select id="document-type"></select>
+    <label for="document-file">Photo du document</label>
+    <input type="file" id="document-file" accept="image/*,application/pdf,text/plain" />
+    <button id="document-submit">Envoyer le document</button>
+  </section>
+
+  <section id="step-selfie" hidden>
+    <h2>2. Selfie et preuve de vie</h2>
+    <input type="file" id="selfie-file" accept="image/*,text/plain" capture="user" />
+    <button id="selfie-submit">Envoyer le selfie</button>
+  </section>
+
+  <section id="step-otp" hidden>
+    <h2>3. Code de verification</h2>
+    <label for="otp-destination">Numero de telephone ou email</label>
+    <input type="text" id="otp-destination" placeholder="+242 06 000 00 00" />
+    <button id="otp-send">Recevoir le code</button>
+    <label for="otp-code">Code recu</label>
+    <input type="text" id="otp-code" inputmode="numeric" autocomplete="one-time-code" />
+    <button id="otp-verify">Valider le code</button>
+  </section>
+
+  <section id="final" hidden>
+    <h2>Verification terminee</h2>
+    <p id="final-message"></p>
+  </section>
+
+  <section>
+    <h2>Etat de la verification</h2>
+    <ul class="checks" id="checks"></ul>
+    <p class="status">Statut : <span id="status">-</span></p>
+    <p class="muted">Aucun document biometrique n'est transmis au commercant.</p>
+  </section>
+</main>
+
+<script>
+const sessionId = {{ session_id | tojson }};
+const token = {{ token | tojson }};
+const api = (path) => `/v1/verification/${sessionId}${path}`;
+const headers = { Authorization: `Bearer ${token}` };
+const $ = (id) => document.getElementById(id);
+
+let steps = [];
+
+const TERMINAL = {
+  VERIFIED: "Votre identite est verifiee. Vous pouvez revenir a l'application.",
+  REJECTED: "La verification n'a pas abouti. Rapprochez-vous de votre conseiller.",
+  REVIEW: "Votre dossier est en cours de revue manuelle. Vous serez recontacte.",
+  EXPIRED: "Cette session de verification a expire. Demandez-en une nouvelle.",
+};
+
+function showError(message) { $("error").textContent = message || ""; }
+
+async function call(path, options = {}) {
+  const response = await fetch(api(path), { ...options, headers: { ...headers, ...(options.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail || `Erreur ${response.status}`);
+  return body;
+}
+
+function renderChecks(checks, status) {
+  $("checks").innerHTML = Object.entries(checks)
+    .map(([name, value]) => `<li><span>${name}</span><span class="${value}">${value}</span></li>`)
+    .join("");
+  $("status").textContent = status;
+  $("status").className = status;
+}
+
+function refreshVisibility(checks, status) {
+  const done = (name) => checks[name] && checks[name] !== "PENDING";
+  const finalMessage = TERMINAL[status];
+  $("final").hidden = !finalMessage;
+  if (finalMessage) {
+    $("final-message").textContent = finalMessage;
+    for (const step of ["step-document", "step-selfie", "step-otp"]) $(step).hidden = true;
+    return;
+  }
+  $("step-document").hidden = done("DOCUMENT_VERIFICATION");
+  $("step-selfie").hidden = !steps.includes("LIVENESS") || !done("DOCUMENT_VERIFICATION") || done("LIVENESS");
+  $("step-otp").hidden = !steps.includes("OTP") || done("OTP")
+    || (steps.includes("LIVENESS") && !done("LIVENESS"));
+}
+
+function update(state) {
+  renderChecks(state.checks, state.status);
+  refreshVisibility(state.checks, state.status);
+}
+
+async function bootstrap() {
+  const context = await call("/context");
+  steps = context.steps;
+  $("flow-label").textContent = context.flow_label;
+  $("document-type").innerHTML = context.accepted_documents
+    .map((doc) => `<option value="${doc}">${doc}</option>`).join("");
+  update(context);
+}
+
+async function upload(path, input) {
+  if (!input.files.length) throw new Error("Selectionnez un fichier");
+  const form = new FormData();
+  form.append("file", input.files[0]);
+  if (path === "/document") form.append("document_type", $("document-type").value);
+  return call(path, { method: "POST", body: form });
+}
+
+function bind(id, handler) {
+  $(id).addEventListener("click", async () => {
+    const button = $(id);
+    button.disabled = true;
+    showError("");
+    try { update(await handler()); } catch (error) { showError(error.message); }
+    button.disabled = false;
+  });
+}
+
+bind("document-submit", async () => {
+  await upload("/document", $("document-file"));
+  return call("/status");
+});
+
+bind("selfie-submit", async () => {
+  await upload("/selfie", $("selfie-file"));
+  return call("/status");
+});
+
+bind("otp-send", async () => {
+  await call("/otp/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel: $("otp-destination").value.includes("@") ? "EMAIL" : "SMS", destination: $("otp-destination").value }),
+  });
+  return call("/status");
+});
+
+bind("otp-verify", async () => {
+  const result = await call("/otp/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: $("otp-code").value }),
+  });
+  if (!result.verified) showError("Code incorrect");
+  return call("/status");
+});
+
+bootstrap().catch((error) => showError(error.message));
+</script>
+</body>
+</html>

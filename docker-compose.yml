@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ekyc
+      POSTGRES_PASSWORD: ekyc
+      POSTGRES_DB: ekyc
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ekyc"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ekyc
+      MINIO_ROOT_PASSWORD: ekyc-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+
+  api:
+    build: .
+    command: >-
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+      EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
+      EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+    env_file: [.env]
+    ports: ["8000:8000"]
+    volumes: ["archive:/srv/ekyc/var"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  # Pool CPU: hash, PDF, signature, OTP, webhooks. Scaler avec `--scale worker-cpu=N`.
+  worker-cpu:
+    build: .
+    command: celery -A app.workers.celery_app:celery_app worker -Q cpu -l info
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+      EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
+      EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+    env_file: [.env]
+    volumes: ["archive:/srv/ekyc/var"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  # Pool GPU mutualise entre tenants: OCR, liveness, face matching.
+  # Sur une machine GPU, ajouter `gpus: all` (ou une reservation NVIDIA) et pointer
+  # EKYC_OCR_PROVIDER / EKYC_FACE_PROVIDER vers les modeles locaux.
+  worker-gpu:
+    build: .
+    command: celery -A app.workers.celery_app:celery_app worker -Q gpu -l info --concurrency 2
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+      EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
+      EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+    env_file: [.env]
+    volumes: ["archive:/srv/ekyc/var"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+
+volumes:
+  pgdata:
+  miniodata:
+  archive:
