@@ -15,6 +15,28 @@ MHC / Banque / Fintech / Administration
 Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le détail des moteurs, du modèle de données et des
 décisions d'architecture.
 
+## Module eKYC maison (auto-hébergé)
+
+Par défaut les moteurs biométrie/OCR/OTP tournent en mode `stub` déterministe.
+Pour déployer sans aucune dépendance à un fournisseur SaaS tiers :
+
+```bash
+pip install -e ".[biometrics,ocr]"
+python -m scripts.fetch_models  # télécharge YuNet + SFace une fois, exécution locale
+```
+
+Puis activez-les via `.env` :
+
+```bash
+EKYC_OCR_PROVIDER=inhouse
+EKYC_FACE_PROVIDER=inhouse
+EKYC_BIOMETRICS_MODEL_DIR=./var/models
+```
+
+Ce module utilise **OpenCV DNN ONNX** (YuNet pour la détection, SFace pour le
+face matching) et des heuristiques de liveness passives ; la clé, les modèles et
+les images restent sur votre infrastructure.
+
 ## Principe d'intégration
 
 Le client ne pilote pas les étapes. Il crée une session et reçoit un résultat abstrait :
@@ -120,11 +142,22 @@ avec `X-EKYC-Timestamp`. Les livraisons sont rejouables et tracées en base.
 Un échec de liveness est bloquant (`REJECTED`) ; un échec de face match part en `REVIEW`.
 Ajouter un vertical = ajouter une policy, pas de code client.
 
+## Connecteur MHC
+
+Un kit de connexion de référence est disponible dans `clients/mhc/` :
+
+- `EkycClient` : OAuth2, création de session, polling, scellement de documents.
+- `verify_webhook` : vérification HMAC des webhooks eKYC.
+- `webhook_receiver.py` : exemple de récepteur FastAPI.
+
+Voir `clients/mhc/README.md`.
+
 ## Tests, lint
 
 ```bash
 pytest -q
 ruff check . && ruff format --check .
+mypy app clients scripts
 ```
 
 Les providers `stub` sont déterministes : inclure `LIVENESS_FAIL`, `FACE_MATCH_FAIL` ou `DOC_FAIL`
