@@ -27,9 +27,13 @@ class HttpOtpSender(OtpSender):
     def send(self, channel: str, destination: str, code: str) -> None:
         if not settings.otp_http_url:
             raise RuntimeError("EKYC_OTP_HTTP_URL is not configured")
+        headers = {}
+        if settings.otp_http_auth_header:
+            headers["Authorization"] = settings.otp_http_auth_header
         response = httpx.post(
             settings.otp_http_url,
             json={"channel": channel, "destination": destination, "code": code},
+            headers=headers,
             timeout=10.0,
         )
         response.raise_for_status()
