@@ -58,6 +58,7 @@ class SessionResultResponse(BaseModel):
     checks: dict[str, str]
     reasons: list[str]
     identity: dict[str, Any] | None
+    risk_score: float | None = None
     created_at: datetime
     completed_at: datetime | None
 

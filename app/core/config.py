@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     face_model_base_url: str = (
         "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
     )
+    # Anti-spoofing / liveness model.
+    antispoof_model: str = "antispoof_quantized.onnx"
+    # Logit-difference threshold for the raw MiniFAS output (0.0 = real > spoof).
+    antispoof_threshold: float = 0.0
     # SFace cosine similarity calibration -> normalized [0,1] match score.
     face_match_cos_reject: float = 0.25
     face_match_cos_accept: float = 0.55
@@ -61,6 +65,11 @@ class Settings(BaseSettings):
     face_match_threshold: float = 0.80
     liveness_threshold: float = 0.70
     document_review_threshold: float = 0.60
+
+    # Risk engine: overall confidence score (0-100) computed from per-step
+    # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
+    risk_accept_threshold: float = 80.0
+    risk_review_threshold: float = 50.0
 
     webhook_timeout_seconds: float = 10.0
     webhook_max_attempts: int = 5

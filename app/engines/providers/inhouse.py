@@ -16,6 +16,7 @@ import io
 from typing import Any
 
 from app.core.config import settings
+from app.engines.providers import antispoof as _antispoof
 from app.engines.providers.base import (
     DocumentAuthenticityResult,
     FaceProvider,
@@ -135,28 +136,57 @@ class _CvEngine:
 class InHouseFaceProvider(FaceProvider):
     name = "inhouse"
 
+    def __init__(self) -> None:
+        self._antispoof = None
+        self._antispoof_failed = False
+
+    def _load_antispoof(self):
+        if self._antispoof is not None or self._antispoof_failed:
+            return self._antispoof
+        try:
+            self._antispoof = _antispoof.AntiSpoofProvider()
+        except Exception:
+            self._antispoof_failed = True
+        return self._antispoof
+
     def liveness(self, selfie: bytes) -> FaceResult:
         engine = _CvEngine.instance()
         image = engine.decode(selfie)
         faces = engine.detect_faces(image)
         if len(faces) == 0:
             return FaceResult(score=0.0, provider=self.name, details={"reason": "NO_FACE"})
-        _, area = engine.largest_face(image, faces)
+        best_face, area = engine.largest_face(image, faces)
         h, w = image.shape[:2]
         face_ratio = area / float(w * h)
         sharpness = engine.sharpness(image)
         saturation = engine.saturation_std(image)
-        score = liveness_score(sharpness, face_ratio, saturation)
-        return FaceResult(
-            score=score,
-            provider=self.name,
-            details={
+        heuristic = liveness_score(sharpness, face_ratio, saturation)
+
+        antispoof = self._load_antispoof()
+        if antispoof is not None:
+            crop = _antispoof.crop_face(image, best_face)
+            prediction = antispoof.predict(crop)
+            # Anti-spoofing dominates, but image-quality heuristics keep a small voice.
+            score = round(0.85 * prediction["real_score"] + 0.15 * heuristic, 4)
+            details = {
                 "faces": int(len(faces)),
                 "sharpness": round(sharpness, 2),
                 "face_ratio": round(face_ratio, 4),
                 "saturation_std": round(saturation, 2),
-            },
-        )
+                "antispoof_score": round(prediction["real_score"], 4),
+                "heuristic": round(heuristic, 4),
+            }
+        else:
+            score = heuristic
+            details = {
+                "faces": int(len(faces)),
+                "sharpness": round(sharpness, 2),
+                "face_ratio": round(face_ratio, 4),
+                "saturation_std": round(saturation, 2),
+                "antispoof": "unavailable",
+            }
+
+        return FaceResult(score=score, provider=self.name, details=details)
 
     def match(self, selfie: bytes, document_image: bytes) -> FaceResult:
         engine = _CvEngine.instance()
