@@ -75,7 +75,10 @@ def test_tenant_receives_only_minimised_result(
     }
     # Raw scores and document numbers stay inside the platform.
     assert "document_number" not in result["identity"]
-    assert "score" not in str(result)
+    assert "score" not in str(result["checks"])
+    assert "score" not in str(result.get("identity") or {})
+    # An aggregate confidence score may be exposed to help MHC decide.
+    assert result.get("risk_score") is not None
 
 
 def test_ocr_parses_mrz_and_audit_chain_is_verifiable(

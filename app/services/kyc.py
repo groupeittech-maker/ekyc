@@ -119,11 +119,18 @@ def set_check(
 
 def evaluate(db: Session, session: KycSession) -> SessionStatus:
     """Re-run the decision engine and close the session when it is complete."""
-    decision = decide(policy_of(session), session.checks)
+    decision = decide(policy_of(session), session.checks, session.internal or {})
     previous_status = session.status
     session.status = decision.status
     session.reasons = decision.reasons if decision.completed else []
     session.updated_at = utcnow()
+
+    merged = dict(session.internal)
+    merged["risk"] = {
+        "score": decision.score,
+        "level": decision.risk_level,
+    }
+    session.internal = merged
 
     if decision.completed and session.completed_at is None:
         session.completed_at = utcnow()
@@ -132,7 +139,12 @@ def evaluate(db: Session, session: KycSession) -> SessionStatus:
             tenant_id=session.tenant_id,
             session_id=session.id,
             event_type=AuditEventType.KYC_DECISION,
-            payload={"status": str(decision.status), "reasons": decision.reasons},
+            payload={
+                "status": str(decision.status),
+                "reasons": decision.reasons,
+                "score": decision.score,
+                "risk_level": decision.risk_level,
+            },
         )
     db.flush()
 
@@ -162,4 +174,7 @@ def public_result(session: KycSession, *, include_identity: bool = True) -> dict
         }
     else:
         result["identity"] = None
+
+    risk = (session.internal or {}).get("risk", {})
+    result["risk_score"] = risk.get("score")
     return result

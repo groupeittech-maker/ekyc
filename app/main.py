@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.v1 import api_router
@@ -32,8 +32,14 @@ app = FastAPI(
     description="Plateforme de confiance numerique: eKYC, signature electronique, preuve.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs",
 )
 app.include_router(api_router)
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/docs", status_code=302)
 
 
 @app.get("/health", tags=["ops"])

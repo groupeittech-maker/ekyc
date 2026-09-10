@@ -24,21 +24,52 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""
     s3_region: str = "eu-west-1"
 
-    ocr_provider: str = "stub"  # stub | tesseract
-    face_provider: str = "stub"
+    ocr_provider: str = "stub"  # stub | tesseract | inhouse
+    face_provider: str = "stub"  # stub | inhouse
     otp_provider: str = "log"  # log | http
     otp_http_url: str = ""
+    otp_http_auth_header: str = ""  # optional Authorization value for the OTP gateway
     otp_length: int = 6
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
 
+    # In-house biometric / OCR module (self-hosted, no third-party SaaS).
+    # ONNX models run locally; see scripts/fetch_models.py to provision them.
+    biometrics_model_dir: str = "./var/models"
+    # Relative paths within the OpenCV Zoo model tree (git-lfs backed).
+    face_detector_model: str = "face_detection_yunet/face_detection_yunet_2023mar.onnx"
+    face_recognizer_model: str = "face_recognition_sface/face_recognition_sface_2021dec.onnx"
+    # media.githubusercontent serves the actual LFS blobs (raw returns pointers).
+    face_model_base_url: str = (
+        "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
+    )
+    # Anti-spoofing / liveness model.
+    antispoof_model: str = "antispoof_quantized.onnx"
+    # Logit-difference threshold for the raw MiniFAS output (0.0 = real > spoof).
+    antispoof_threshold: float = 0.0
+    # SFace cosine similarity calibration -> normalized [0,1] match score.
+    face_match_cos_reject: float = 0.25
+    face_match_cos_accept: float = 0.55
+    # Passive liveness heuristics.
+    liveness_min_sharpness: float = 60.0
+    liveness_min_face_ratio: float = 0.06
+
+    signing_backend: str = "local"  # local | (kms/hsm: implement Signer interface)
     signing_key_path: str = "./var/keys/signing_key.pem"
     signing_cert_path: str = ""
+    # When no certificate is provisioned, auto-generate a self-signed one for
+    # development so evidence carries a certificate fingerprint. Disable in prod.
+    signing_dev_self_signed_cert: bool = True
     tsa_url: str = ""  # RFC 3161 Timestamp Authority; empty -> local soft timestamp
 
     face_match_threshold: float = 0.80
     liveness_threshold: float = 0.70
     document_review_threshold: float = 0.60
+
+    # Risk engine: overall confidence score (0-100) computed from per-step
+    # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
+    risk_accept_threshold: float = 80.0
+    risk_review_threshold: float = 50.0
 
     webhook_timeout_seconds: float = 10.0
     webhook_max_attempts: int = 5

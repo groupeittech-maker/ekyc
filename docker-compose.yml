@@ -24,6 +24,29 @@ services:
       MINIO_ROOT_PASSWORD: ekyc-secret
     ports: ["9000:9000", "9001:9001"]
     volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      retries: 10
+
+  # One-shot: create the archive bucket so the s3 backend works out of the box.
+  createbuckets:
+    image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+    depends_on:
+      minio: {condition: service_started}
+    entrypoint: >-
+      sh -c "until mc alias set ekyc http://minio:9000 ekyc ekyc-secret; do sleep 2; done &&
+             mc mb --ignore-existing ekyc/ekyc-archive &&
+             echo 'bucket ready'"
+
+  # One-shot: provision the in-house biometric ONNX models into the shared volume.
+  # Runs only when the inhouse providers are enabled; safe to re-run (idempotent).
+  models-init:
+    build: .
+    command: python -m scripts.fetch_models
+    environment:
+      EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
+    volumes: ["models:/srv/ekyc/var/models"]
 
   api:
     build: .
@@ -36,9 +59,10 @@ services:
       EKYC_CELERY_ALWAYS_EAGER: "false"
       EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
       EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+      EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
     env_file: [.env]
     ports: ["8000:8000"]
-    volumes: ["archive:/srv/ekyc/var"]
+    volumes: ["archive:/srv/ekyc/var", "models:/srv/ekyc/var/models"]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
@@ -71,8 +95,9 @@ services:
       EKYC_CELERY_ALWAYS_EAGER: "false"
       EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
       EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+      EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
     env_file: [.env]
-    volumes: ["archive:/srv/ekyc/var"]
+    volumes: ["archive:/srv/ekyc/var", "models:/srv/ekyc/var/models"]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
@@ -81,3 +106,4 @@ volumes:
   pgdata:
   miniodata:
   archive:
+  models:

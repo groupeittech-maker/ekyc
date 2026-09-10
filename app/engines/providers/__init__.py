@@ -10,6 +10,10 @@ from app.engines.providers.stub import StubFaceProvider, StubOcrProvider
 
 @lru_cache
 def get_ocr_provider() -> OcrProvider:
+    if settings.ocr_provider == "inhouse":
+        from app.engines.providers.inhouse import InHouseOcrProvider
+
+        return InHouseOcrProvider()
     if settings.ocr_provider == "tesseract":
         from app.engines.providers.tesseract import TesseractOcrProvider
 
@@ -19,6 +23,10 @@ def get_ocr_provider() -> OcrProvider:
 
 @lru_cache
 def get_face_provider() -> FaceProvider:
+    if settings.face_provider == "inhouse":
+        from app.engines.providers.inhouse import InHouseFaceProvider
+
+        return InHouseFaceProvider()
     return StubFaceProvider()
 
 
