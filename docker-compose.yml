@@ -48,6 +48,14 @@ services:
       EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
     volumes: ["models:/srv/ekyc/var/models"]
 
+  # One-shot: provision the anti-spoofing ONNX model (MiniFAS).
+  antispoof-init:
+    build: .
+    command: python -m scripts.fetch_antispoof
+    environment:
+      EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
+    volumes: ["models:/srv/ekyc/var/models"]
+
   api:
     build: .
     command: >-

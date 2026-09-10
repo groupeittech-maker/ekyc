@@ -251,6 +251,7 @@ class InHouseOcrProvider(OcrProvider):
             "sharpness": round(sharpness, 2),
             "portrait_detected": bool(len(faces) > 0),
             "mrz_checks_passed": mrz_ok,
+            "mrz_checks": ocr.fields.get("checks"),
         }
         # Weighted evidence: MRZ integrity dominates, then a legible portrait,
         # then overall capture sharpness.
