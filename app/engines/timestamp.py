@@ -33,8 +33,8 @@ def _rfc3161_request(digest_hex: str) -> bytes:
     return build_timestamp_request(bytes.fromhex(digest_hex))
 
 
-def request_timestamp(digest_hex: str) -> TimestampToken:
-    if settings.tsa_url:
+def request_timestamp(digest_hex: str, *, qualified: bool = False) -> TimestampToken:
+    if qualified and settings.tsa_url:
         response = httpx.post(
             settings.tsa_url,
             content=_rfc3161_request(digest_hex),

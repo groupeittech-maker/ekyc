@@ -39,6 +39,7 @@ def seal_document(
     pdf_bytes: bytes,
     document_reference: str | None = None,
     filename: str = "document.pdf",
+    qualified_timestamp: bool = False,
 ) -> SignedDocument:
     tenant_id = session.tenant_id
 
@@ -83,7 +84,7 @@ def seal_document(
         document_hash=digest,
     )
 
-    token = request_timestamp(digest)
+    token = request_timestamp(digest, qualified=qualified_timestamp)
     token_artifact = store_artifact(
         db,
         tenant_id=tenant_id,

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentTenant, DbSession, client_ip, get_tenant_session
+from app.core.config import settings
 from app.db.base import utcnow
 from app.engines import audit
 from app.engines.policy import UnknownFlowError
@@ -118,6 +119,7 @@ def kyc_certificate(session: TenantSession, db: DbSession, tenant: CurrentTenant
             pdf_bytes=pdf,
             document_reference=CERTIFICATE_REFERENCE,
             filename=f"{session.id}-certificate.pdf",
+            qualified_timestamp=settings.tsa_qualified_certificates,
         )
         db.commit()
 
