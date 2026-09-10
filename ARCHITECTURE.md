@@ -110,7 +110,50 @@ OCR, biométrie, génération PDF, signature, archivage et webhooks sont des tâ
 `EKYC_CELERY_ALWAYS_EAGER=true` les exécute en ligne pour garder le parcours reproductible ; en
 production ces traitements sortent du cycle HTTP et l'API répond `202`.
 
-## 9. Suite du produit
+## 9. Infrastructure cible et coût par KYC
+
+Le revenu brut est de 300 FCFA par KYC ; l'objectif technique est un coût infrastructure + IA
+**inférieur à 30–50 FCFA par vérification**, le reste couvrant SMS OTP, horodatage, stockage,
+bande passante et exploitation. Tout l'inférence tourne en local (modèles OCR / face / liveness
+open source), aucun appel facturé à l'unité chez un tiers.
+
+```
+                MHC · Banque · Fintech · …
+                          │
+                   Nginx / API Gateway
+                          │
+                   eKYC API (FastAPI)          ← CPU
+                          │
+                        Redis
+              ┌───────────┴───────────┐
+        file `cpu`                 file `gpu`
+   hash · PDF · signature      OCR · liveness · face
+   OTP · webhooks · audit      embedding / matching
+        worker-cpu ×N            worker-gpu ×M   ← pool GPU mutualisé
+              └───────────┬───────────┘
+                  PostgreSQL · Object storage
+```
+
+Décisions :
+
+- **Deux pools de workers** (`app/workers/celery_app.py`) : les tâches vision sont routées sur la
+  file `gpu`, tout le reste sur `cpu`. Passer de 1 à 4 GPU = lancer des `worker-gpu`
+  supplémentaires ; ni l'API ni MHC ne changent.
+- **GPU mutualisé, jamais réservé à un tenant** : la file est unique, les tâches portent le
+  `tenant_id` pour la facturation et l'isolation des données, pas pour l'ordonnancement.
+- **Providers interchangeables** (`app/engines/providers/base.py` : `OcrProvider`,
+  `FaceProvider`, `OtpSender`) : remplacer PaddleOCR par Qwen-VL ou un modèle de liveness par un
+  autre n'impacte que la configuration (`EKYC_OCR_PROVIDER`, `EKYC_FACE_PROVIDER`).
+- **Un seul serveur GPU dédié plutôt que VPS CPU + VPS GPU** tant que le volume ne justifie pas
+  la séparation : PostgreSQL, Redis, API, workers CPU et le pool GPU cohabitent ; le stockage
+  objet est le premier composant à externaliser quand le volume d'archives croît.
+- **Suivi du coût unitaire** : chaque tâche GPU journalise sa durée ; le coût par KYC se déduit
+  de `(coût mensuel serveur + SMS) / KYC du mois` et doit être suivi comme un KPI produit.
+
+Ordre de grandeur des seuils : à 50 000–100 000 KYC/mois (15–30 M FCFA), un serveur dédié
+16–32 cœurs / 64–128 Go / NVMe / 1 GPU est largement amorti ; au-delà, on ajoute des GPU au pool.
+
+## 10. Suite du produit
 
 La même base porte les briques suivantes : e-signature autonome (signature de documents hors
 parcours KYC), vérification externe d'un document par son empreinte, portail tenant et console

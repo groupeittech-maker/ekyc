@@ -67,9 +67,28 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
 
-  worker:
+  # Pool CPU: hash, PDF, signature, OTP, webhooks. Scaler avec `--scale worker-cpu=N`.
+  worker-cpu:
     build: .
-    command: celery -A app.workers.celery_app:celery_app worker -Q ekyc,ocr,biometrics,webhooks -l info
+    command: celery -A app.workers.celery_app:celery_app worker -Q cpu -l info
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+      EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
+      EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+    env_file: [.env]
+    volumes: ["archive:/srv/ekyc/var"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  # Pool GPU mutualise entre tenants: OCR, liveness, face matching.
+  # Sur une machine GPU, ajouter `gpus: all` (ou une reservation NVIDIA) et pointer
+  # EKYC_OCR_PROVIDER / EKYC_FACE_PROVIDER vers les modeles locaux.
+  worker-gpu:
+    build: .
+    command: celery -A app.workers.celery_app:celery_app worker -Q gpu -l info --concurrency 2
     environment:
       EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
       EKYC_REDIS_URL: redis://redis:6379/0

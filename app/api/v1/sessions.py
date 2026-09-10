@@ -4,6 +4,7 @@ import base64
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
 
 from app.api.deps import CurrentTenant, DbSession, client_ip, get_tenant_session
 from app.db.base import utcnow
@@ -85,22 +86,54 @@ def export_audit(session: TenantSession, db: DbSession) -> AuditExportResponse:
     )
 
 
+CERTIFICATE_REFERENCE = "KYC_CERTIFICATE"
+
+
 @router.get("/{session_id}/certificate")
 def kyc_certificate(session: TenantSession, db: DbSession, tenant: CurrentTenant) -> Response:
-    pdf = render_kyc_certificate(
-        session_id=session.id,
-        tenant_name=tenant.name,
-        flow=session.flow,
-        status=str(session.status),
-        identity=(kyc.public_result(session)["identity"] or {}),
-        checks=session.checks,
-        audit_head_hash=audit.verify_chain(db, session.id).get("head_hash"),
-        issued_at=utcnow().isoformat(timespec="seconds"),
-    )
+    """Return the KYC certificate, sealed by the evidence pipeline and archived."""
+    signed = db.scalars(
+        select(SignedDocument)
+        .where(
+            SignedDocument.session_id == session.id,
+            SignedDocument.document_reference == CERTIFICATE_REFERENCE,
+        )
+        .order_by(SignedDocument.created_at.desc())
+    ).first()
+
+    if signed is None:
+        pdf = render_kyc_certificate(
+            session_id=session.id,
+            tenant_name=tenant.name,
+            flow=session.flow,
+            status=str(session.status),
+            identity=(kyc.public_result(session)["identity"] or {}),
+            checks=session.checks,
+            audit_head_hash=audit.verify_chain(db, session.id).get("head_hash"),
+            issued_at=utcnow().isoformat(timespec="seconds"),
+        )
+        signed = evidence.seal_document(
+            db,
+            session,
+            pdf_bytes=pdf,
+            document_reference=CERTIFICATE_REFERENCE,
+            filename=f"{session.id}-certificate.pdf",
+        )
+        db.commit()
+
+    artifact = db.get(Artifact, signed.signed_artifact_id)
+    if artifact is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate artifact missing")
     return Response(
-        content=pdf,
+        content=read_artifact(artifact),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{session.id}-certificate.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{session.id}-certificate.pdf"',
+            "X-EKYC-Document-Sha256": signed.sha256,
+            "X-EKYC-Signature-Algorithm": signed.signature_algorithm,
+            "X-EKYC-Timestamp-Authority": signed.timestamp_authority or "",
+            "X-EKYC-Timestamp-Qualified": str(bool(signed.timestamp_details.get("qualified"))),
+        },
     )
 
 
