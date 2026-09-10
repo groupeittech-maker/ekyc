@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # development so evidence carries a certificate fingerprint. Disable in prod.
     signing_dev_self_signed_cert: bool = True
     tsa_url: str = ""  # RFC 3161 Timestamp Authority; empty -> local soft timestamp
+    tsa_qualified_certificates: bool = False  # only final KYC certificate uses paid TSA
 
     face_match_threshold: float = 0.80
     liveness_threshold: float = 0.70
