@@ -8,6 +8,7 @@ from typing import Any
 
 _WEIGHTS = (7, 3, 1)
 _FILLER = "<"
+_MRZ_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<")
 
 
 def _char_value(char: str) -> int:
@@ -72,10 +73,15 @@ def parse_td3(line1: str, line2: str) -> dict[str, Any]:
 MRZ_LINE_RE = re.compile(r"^[A-Z0-9<]{30,44}$")
 
 
+def _normalize(line: str) -> str:
+    """Keep only MRZ-legal characters and trim to the standard 44-char width."""
+    return "".join(char for char in line.upper() if char in _MRZ_ALPHABET)[:44]
+
+
 def find_mrz(text: str) -> tuple[str, str] | None:
-    lines = [line.strip().upper().replace(" ", "") for line in text.splitlines()]
+    lines = [_normalize(line) for line in text.splitlines() if _normalize(line)]
     candidates = [line for line in lines if MRZ_LINE_RE.match(line)]
     for first, second in zip(candidates, candidates[1:], strict=False):
-        if len(first) >= 44 or first.startswith("P<"):
+        if len(first) >= 44 or first.startswith(("P<", "I<")):
             return first, second
     return None

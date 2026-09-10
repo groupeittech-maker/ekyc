@@ -223,12 +223,47 @@ class InHouseOcrProvider(OcrProvider):
         gray = engine.cv2.cvtColor(img, engine.cv2.COLOR_BGR2GRAY)
         return img, gray
 
-    def extract(self, image: bytes, document_type: str) -> OcrResult:
+    @staticmethod
+    def _preprocess_for_mrz(gray):
+        """Enhance a grayscale image for TD3 MRZ reading."""
+        engine = _CvEngine.instance()
+        # Scale to a comfortable OCR width without distorting the MRZ too much.
+        scale = 1300 / max(gray.shape[1], 1)
+        if scale < 0.5 or scale > 2.0:
+            new_size = (int(gray.shape[1] * scale), int(gray.shape[0] * scale))
+            gray = engine.cv2.resize(gray, new_size, interpolation=engine.cv2.INTER_CUBIC)
+        clahe = engine.cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        # Otsu gives a clean binary; we also return the enhanced gray as fallback.
+        _, binary = engine.cv2.threshold(
+            enhanced, 0, 255, engine.cv2.THRESH_BINARY + engine.cv2.THRESH_OTSU
+        )
+        return binary, enhanced
+
+    def _read_mrz(self, image: bytes):
         import pytesseract
         from PIL import Image
 
-        text = pytesseract.image_to_string(Image.open(io.BytesIO(image)))
+        engine = _CvEngine.instance()
+        img = engine.decode(image)
+        gray = engine.cv2.cvtColor(img, engine.cv2.COLOR_BGR2GRAY)
+        binary, _ = self._preprocess_for_mrz(gray)
+
+        # Constrain Tesseract to the MRZ character set and line layout.
+        tesseract_config = (
+            "--psm 6 -c tessedit_char_whitelist="
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+        )
+        text = pytesseract.image_to_string(Image.fromarray(binary), config=tesseract_config)
         mrz = find_mrz(text)
+        if not mrz:
+            # Fallback: try the original image with a more permissive layout.
+            text = pytesseract.image_to_string(Image.open(io.BytesIO(image)))
+            mrz = find_mrz(text)
+        return mrz, text
+
+    def extract(self, image: bytes, document_type: str) -> OcrResult:
+        mrz, text = self._read_mrz(image)
         if mrz:
             fields = parse_td3(*mrz)
             fields["document_type"] = document_type
@@ -240,25 +275,65 @@ class InHouseOcrProvider(OcrProvider):
             )
         return OcrResult(fields={}, raw_text=text, confidence=0.0, provider=self.name)
 
+    @staticmethod
+    def _ela_signals(image: bytes) -> dict[str, float]:
+        """Error Level Analysis: high residual on a re-saved JPEG can reveal editing.
+
+        Returns a low score (0..1) when the image is very likely a re-saved or
+        screen-captured composite, and a high score when it looks like an original.
+        """
+        from PIL import Image
+
+        try:
+            original = Image.open(io.BytesIO(image))
+        except Exception:
+            return {"ela_mean": 0.0, "ela_score": 0.5}
+
+        if original.format != "JPEG":
+            # ELA is only meaningful for JPEG originals.
+            return {"ela_mean": 0.0, "ela_score": 0.5}
+
+        import numpy as np
+
+        # Re-save at a fixed quality and measure the per-pixel difference.
+        resaved = io.BytesIO()
+        original.save(resaved, format="JPEG", quality=90)
+        resaved.seek(0)
+        resaved_img = Image.open(resaved).convert("RGB")
+        original_rgb = original.convert("RGB")
+
+        original_arr = np.array(original_rgb, dtype=np.float32)
+        resaved_arr = np.array(resaved_img, dtype=np.float32)
+        diff = np.abs(original_arr - resaved_arr)
+        ela_mean = float(np.mean(diff))
+
+        # Empirical: very clean originals sit below ~2; heavy re-saves/screenshots
+        # can climb to 20+. Anything above 8 is treated as suspicious.
+        suspicious = max(0.0, min(1.0, (ela_mean - 2.0) / 8.0))
+        return {"ela_mean": round(ela_mean, 2), "ela_score": round(1.0 - suspicious, 4)}
+
     def check_authenticity(self, image: bytes, ocr: OcrResult) -> DocumentAuthenticityResult:
         engine = _CvEngine.instance()
         img, _ = self._preprocess(image)
         sharpness = engine.sharpness(img)
         faces = engine.detect_faces(img)
         mrz_ok = bool(ocr.fields.get("checks_passed"))
+        ela = self._ela_signals(image)
 
         signals: dict[str, Any] = {
             "sharpness": round(sharpness, 2),
             "portrait_detected": bool(len(faces) > 0),
             "mrz_checks_passed": mrz_ok,
             "mrz_checks": ocr.fields.get("checks"),
+            **ela,
         }
         # Weighted evidence: MRZ integrity dominates, then a legible portrait,
-        # then overall capture sharpness.
+        # then ELA / capture quality.
         confidence = (
-            (0.6 if mrz_ok else 0.0)
+            (0.55 if mrz_ok else 0.0)
             + (0.25 if len(faces) > 0 else 0.0)
-            + 0.15 * _clamp(sharpness / (settings.liveness_min_sharpness * 2.0))
+            + 0.10 * _clamp(sharpness / (settings.liveness_min_sharpness * 2.0))
+            + 0.10 * ela["ela_score"]
         )
         confidence = round(_clamp(confidence), 4)
         return DocumentAuthenticityResult(
