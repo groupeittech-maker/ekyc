@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     face_model_base_url: str = (
         "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models"
     )
+    # GPU: auto-detection. When true, ONNX models use the best execution
+    # provider available (CUDA > CPU); when false, force CPU. No GPU host?
+    # Leave it on — the code silently falls back to CPU.
+    gpu_enabled: bool = True
     # Anti-spoofing / liveness model.
     antispoof_model: str = "antispoof_quantized.onnx"
     # Logit-difference threshold for the raw MiniFAS output (0.0 = real > spoof).

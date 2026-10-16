@@ -1,0 +1,38 @@
+# GPU variant of the eKYC image: same code, CUDA-enabled ONNX Runtime.
+#
+# Build:  docker build -f Dockerfile.gpu -t ekyc:gpu .
+# Used by docker-compose.gpu.yml for the `worker-gpu` pool; the API and the
+# `worker-cpu` pool keep the slim CPU image — only vision workers need CUDA.
+#
+# Base image ships the CUDA 12.6 + cuDNN 9 runtime required by onnxruntime-gpu.
+# NVIDIA Container Toolkit must be installed on the host (compose reserves a
+# device via `deploy.resources.reservations`). Without a GPU the container
+# still starts — providers/runtime.py falls back to CPU execution.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    EKYC_GPU_ENABLED=true
+
+WORKDIR /srv/ekyc
+
+# Ubuntu 24.04 ships Python 3.12. PEP 668 marks the system env as externally
+# managed, so dependencies go into a venv exposed on PATH.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv \
+        build-essential libpq-dev tesseract-ocr libglib2.0-0 \
+    && python3 -m venv /opt/venv \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml ./
+COPY app ./app
+RUN pip install --no-cache-dir ".[ocr,biometrics-gpu]"
+
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY scripts ./scripts
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

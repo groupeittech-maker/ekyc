@@ -10,10 +10,15 @@ provider will simply fall back to heuristic liveness in that case.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from app.core.config import settings
+from app.engines.providers import runtime
 from app.engines.providers.models import model_path
+
+logger = logging.getLogger(__name__)
 
 _MODEL_IMG_SIZE = 128
 
@@ -46,8 +51,9 @@ class AntiSpoofProvider:
         import onnxruntime as ort
 
         path = model_path(settings.antispoof_model, download=False)
-        self._session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        self._session = ort.InferenceSession(str(path), providers=runtime.onnx_providers())
         self._input_name = self._session.get_inputs()[0].name
+        logger.info("antispoof model loaded on %s", ",".join(self._session.get_providers()))
 
     def predict(self, face_crop: np.ndarray) -> dict[str, float]:
         """Return liveness score and supporting diagnostics for a BGR face crop."""

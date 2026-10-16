@@ -34,8 +34,14 @@ EKYC_BIOMETRICS_MODEL_DIR=./var/models
 ```
 
 Ce module utilise **OpenCV DNN ONNX** (YuNet pour la détection, SFace pour le
-face matching) et des heuristiques de liveness passives ; la clé, les modèles et
-les images restent sur votre infrastructure.
+face matching), un modèle anti-spoofing MiniFAS (ONNX Runtime) et des
+heuristiques de liveness passives ; la clé, les modèles et les images restent
+sur votre infrastructure.
+
+**GPU** : `EKYC_GPU_ENABLED=true` (défaut) auto-détecte CUDA et retombe
+silencieusement sur CPU. Pour le wheel GPU : `pip install -e ".[ocr,biometrics-gpu]"`
+(à la place de `biometrics` — les deux wheel `onnxruntime` sont exclusifs).
+Voir `Dockerfile.gpu` + `docker-compose.gpu.yml` pour le pool `worker-gpu`.
 
 ## Principe d'intégration
 
@@ -78,6 +84,13 @@ Avec Docker (PostgreSQL, Redis, MinIO, API, workers Celery `cpu` et `gpu`) :
 ```bash
 cp .env.example .env
 docker compose up --build
+```
+
+Sur un hôte NVIDIA (driver + Container Toolkit), la même stack accélère le pool
+vision sur GPU :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 ```
 
 En développement (`EKYC_ENVIRONMENT=development`) les tables sont créées au démarrage.
@@ -142,15 +155,19 @@ avec `X-EKYC-Timestamp`. Les livraisons sont rejouables et tracées en base.
 Un échec de liveness est bloquant (`REJECTED`) ; un échec de face match part en `REVIEW`.
 Ajouter un vertical = ajouter une policy, pas de code client.
 
-## Connecteur MHC
+## SDK Python & connecteurs
 
-Un kit de connexion de référence est disponible dans `clients/mhc/` :
+Le SDK générique pour applications tierces vit dans `clients/ekyc/` :
 
-- `EkycClient` : OAuth2, création de session, polling, scellement de documents.
+- `EkycClient` : OAuth2, sessions, polling, audit export, certificat,
+  scellement et téléchargement de documents.
 - `verify_webhook` : vérification HMAC des webhooks eKYC.
-- `webhook_receiver.py` : exemple de récepteur FastAPI.
+- `webhook_receiver.py` : récepteur FastAPI de référence.
+- Installable via `pip install ./clients` (`import ekyc`) ou copiable tel quel
+  (dépendance unique : `httpx`).
 
-Voir `clients/mhc/README.md`.
+Voir `clients/ekyc/README.md`. `clients/mhc/` est l'adaptateur de référence MHC
+au-dessus de ce SDK.
 
 ## Tests, lint
 

@@ -1,8 +1,10 @@
 # MHC eKYC Connector (reference)
 
-Standalone integration kit for consuming the IT-TECH eKYC API from MHC
-(Mobility Healthcare) — or any other tenant. Copy the `clients/mhc` folder into
-the MHC application; the only hard dependency is `httpx`.
+MHC-flavored adapter over the **generic eKYC SDK** (`clients/ekyc`). The SDK
+carries the implementation (OAuth2, sessions, evidence, webhooks); this folder
+re-exports it under the `clients.mhc` name and ships MHC's example webhook
+receiver. New integrations should use `clients/ekyc` directly — see
+`clients/ekyc/README.md`.
 
 ## What it covers
 
