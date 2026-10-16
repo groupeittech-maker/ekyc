@@ -1,0 +1,38 @@
+# Production overrides — internal services are never published on the public
+# interface (there may be no firewall in front of the host). Only the API is
+# exposed, bound to localhost behind the system nginx reverse proxy.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Requires POSTGRES_PASSWORD in .env (interpolated into both the database and
+# the EKYC_DATABASE_URL of every app service).
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  minio:
+    # Console + S3 API reachable only through an SSH tunnel / local admin.
+    ports: !reset ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+
+  api:
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:${POSTGRES_PASSWORD}@postgres:5432/ekyc
+    ports: !reset ["127.0.0.1:8050:8000"]
+    restart: unless-stopped
+
+  worker-cpu:
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:${POSTGRES_PASSWORD}@postgres:5432/ekyc
+    restart: unless-stopped
+
+  worker-gpu:
+    # No GPU on this host: consumes the `gpu` queue with CPU execution
+    # (EKYC_GPU_ENABLED auto-detection). On a GPU host add compose.gpu.yml.
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:${POSTGRES_PASSWORD}@postgres:5432/ekyc
+    restart: unless-stopped
