@@ -1,9 +1,8 @@
-"""Reference eKYC connector for MHC (and any other tenant).
+"""Reference eKYC connector for MHC — thin adapter over the generic SDK.
 
-This package is intentionally standalone (only ``httpx`` is required) so it can
-be copied into the MHC application as-is. It covers the full tenant integration:
-OAuth2 client_credentials, session creation, result polling, document sealing
-and signed-webhook verification.
+The implementation lives in ``clients.ekyc`` (generic, reusable by any tenant);
+this package re-exports it under the MHC name and ships MHC's example webhook
+receiver.
 """
 
 from clients.mhc.ekyc_client import (

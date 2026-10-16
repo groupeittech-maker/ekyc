@@ -1,0 +1,13 @@
+# Packaging for the generic eKYC SDK — `pip install <repo>/clients` exposes
+# the `ekyc` package (clients/ekyc/). The `clients/mhc` connector is a usage
+# example and is intentionally not shipped.
+[project]
+name = "ittech-ekyc-sdk"
+version = "0.1.0"
+description = "Python SDK for the IT-TECH eKYC platform (sessions, evidence, webhooks)"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27,<0.29"]
+readme = "ekyc/README.md"
+
+[tool.setuptools.packages.find]
+include = ["ekyc*"]

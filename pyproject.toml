@@ -39,6 +39,17 @@ biometrics = [
     "pytesseract==0.3.13",
     "Pillow==10.4.0",
 ]
+# GPU build of the in-house module — installs onnxruntime-gpu INSTEAD of the
+# CPU wheel (they ship the same `onnxruntime` package, never install both).
+# Requires an NVIDIA driver + CUDA 12 / cuDNN 9 runtime (see Dockerfile.gpu);
+# the code auto-detects and falls back to CPU when no device is visible.
+biometrics-gpu = [
+    "opencv-python-headless==4.10.0.84",
+    "numpy==2.1.2",
+    "onnxruntime-gpu==1.29.0",
+    "pytesseract==0.3.13",
+    "Pillow==10.4.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

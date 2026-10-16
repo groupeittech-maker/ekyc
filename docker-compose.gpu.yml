@@ -1,0 +1,27 @@
+# GPU override — run alongside the base compose file on a host with an
+# NVIDIA GPU + Container Toolkit:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Without this file the `worker-gpu` service still works: it consumes the same
+# `gpu` queue but executes ONNX inference on CPU (auto-detection).
+services:
+  worker-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+      EKYC_STORAGE_ROOT: /srv/ekyc/var/storage
+      EKYC_SIGNING_KEY_PATH: /srv/ekyc/var/keys/signing_key.pem
+      EKYC_BIOMETRICS_MODEL_DIR: /srv/ekyc/var/models
+      EKYC_GPU_ENABLED: "true"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -5,6 +5,12 @@ Face detection and recognition run locally through OpenCV's ONNX runtime
 heuristic combining sharpness, face size and colour richness; an ONNX
 anti-spoofing model can be layered on the same interface later.
 
+GPU note: ``cv2.FaceDetectorYN`` / ``cv2.FaceRecognizerSF`` do not expose a
+backend selector, so they always run on CPU unless OpenCV is rebuilt with
+CUDA DNN support. Both models are small (YuNet ~230 KB, SFace ~37 MB) and
+stay fast on CPU; the GPU payoff goes through ONNX Runtime providers
+(anti-spoofing today — see ``providers/runtime.py`` for auto-detection).
+
 The heavy dependencies (``opencv-python-headless``, ``numpy``) are optional and
 only imported when this provider is selected, so the default stub build stays
 lightweight.
@@ -251,8 +257,7 @@ class InHouseOcrProvider(OcrProvider):
 
         # Constrain Tesseract to the MRZ character set and line layout.
         tesseract_config = (
-            "--psm 6 -c tessedit_char_whitelist="
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+            "--psm 6 -c tessedit_char_whitelist=" "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
         )
         text = pytesseract.image_to_string(Image.fromarray(binary), config=tesseract_config)
         mrz = find_mrz(text)

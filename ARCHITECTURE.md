@@ -141,6 +141,11 @@ Décisions :
   supplémentaires ; ni l'API ni MHC ne changent.
 - **GPU mutualisé, jamais réservé à un tenant** : la file est unique, les tâches portent le
   `tenant_id` pour la facturation et l'isolation des données, pas pour l'ordonnancement.
+- **Exécution CPU↔GPU auto-détectée** (`EKYC_GPU_ENABLED`, `app/engines/providers/runtime.py`) :
+  ONNX Runtime utilise `CUDAExecutionProvider` quand le wheel `onnxruntime-gpu` et un device
+  NVIDIA sont présents, sinon `CPUExecutionProvider` — le même code et la même file `gpu`
+  tournent sur un hôte sans GPU. L'image CUDA dédiée (`Dockerfile.gpu`) ne sert que le pool
+  `worker-gpu` via `docker-compose.gpu.yml`.
 - **Providers interchangeables** (`app/engines/providers/base.py` : `OcrProvider`,
   `FaceProvider`, `OtpSender`) : remplacer PaddleOCR par Qwen-VL ou un modèle de liveness par un
   autre n'impacte que la configuration (`EKYC_OCR_PROVIDER`, `EKYC_FACE_PROVIDER`).
