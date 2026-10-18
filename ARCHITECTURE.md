@@ -60,6 +60,20 @@ Brancher un fournisseur commercial revient à implémenter l'interface de `provi
 
 ## 4. Chaîne de preuve
 
+### 4 bis. Coffre de données (chiffrement au repos)
+
+`EKYC_STORAGE_ENCRYPTION=true` active le coffre (`app/services/vault.py`) : chaque artefact est
+scellé en AES-256-GCM **avant** d'atteindre le backend `local` ou `s3` — le stockage ne voit que
+du ciphertext.
+
+- **KEK** (clé maîtresse) hors des données : `EKYC_KEK` (env/KMS) en prod, fichier auto-généré en dev.
+- **DEK par tenant** : `HKDF-SHA256(KEK, "ekyc-vault:<tenant>:<version>")` — dérivation
+  déterministe, aucune clé en base ; rotation = `EKYC_KEK_VERSION` +1 (les anciens blobs restent lisibles).
+- **AAD** : en-tête + `tenant_id` liés au ciphertext — un blob déplacé sous un autre tenant échoue à l'authentification.
+- **Format auto-descriptif** (`EKYCENC` magic + version) : les artefacts legacy en clair restent lisibles, migration paresseuse possible.
+- **`sha256` = hash du clair** : les preuves d'intégrité et les signatures ne sont pas affectées par le chiffrement au repos.
+- **`KeyProvider`** est le point d'extension KMS (AWS KMS, HashiCorp Vault, HSM) via `EKYC_KMS_BACKEND`.
+
 `app/services/evidence.py` exécute pour chaque document :
 
 ```

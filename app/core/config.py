@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""
     s3_region: str = "eu-west-1"
 
+    # Data vault: at-rest envelope encryption (AES-256-GCM) for every artifact.
+    # DEKs are derived per tenant from a master KEK held outside the data.
+    # Enable in production; legacy plaintext blobs stay readable either way.
+    storage_encryption_enabled: bool = False
+    kek: str = ""  # 32-byte key, hex or base64 — inject from KMS/secrets in prod
+    kek_path: str = "./var/keys/kek.hex"  # dev fallback: auto-generated file
+    kek_version: int = 1  # bump to rotate DEKs; old blobs stay decryptable
+    kms_backend: str = "local"  # local | (aws-kms/vault: implement KeyProvider)
+
     ocr_provider: str = "stub"  # stub | tesseract | inhouse
     face_provider: str = "stub"  # stub | inhouse
     otp_provider: str = "log"  # log | http

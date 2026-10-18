@@ -186,5 +186,8 @@ dans les octets envoyés permet de tester les branches d'échec.
 - Clé de signature gérée par HSM/KMS ; la clé RSA auto-générée est réservée au développement.
 - Configurer `EKYC_TSA_URL` (RFC 3161) : sans TSA, l'horodatage local est marqué `qualified: false`.
 - `EKYC_CELERY_ALWAYS_EAGER=false` pour sortir OCR/biométrie/PDF du cycle HTTP.
-- Stockage objet chiffré (`EKYC_STORAGE_BACKEND=s3`), rétention par tenant.
+- Coffre chiffré : `EKYC_STORAGE_ENCRYPTION=true` + `EKYC_KEK` injecté depuis un
+  gestionnaire de secrets (AES-256-GCM par artefact, DEK dérivée par tenant).
+  La perte de la KEK rend l'archive illisible — la sauvegarder comme la clé de signature.
+- Stockage objet : `EKYC_STORAGE_BACKEND=local` (volume chiffré) ou `s3` (boto3 requis), rétention par tenant.
 - Brancher de vrais providers OCR/biométrie (`EKYC_OCR_PROVIDER`, `EKYC_FACE_PROVIDER`).
