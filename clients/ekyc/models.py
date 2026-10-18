@@ -17,6 +17,7 @@ class KycResult:
     session_id: str
     status: str
     flow: str | None = None
+    jurisdiction: str | None = None
     identity: dict[str, Any] | None = None
     checks: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)

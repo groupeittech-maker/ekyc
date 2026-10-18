@@ -91,11 +91,21 @@ class EkycClient:
         customer_reference: str,
         flow: str,
         metadata: dict[str, Any] | None = None,
+        jurisdiction: str | None = None,
     ) -> dict[str, Any]:
-        """Create a session; returns the payload including ``verification_url``."""
+        """Create a session; returns the payload including ``verification_url``.
+
+        ``jurisdiction`` asserts the *regulatory context* of the operation
+        (e.g. ``"CI"``, ``"EU"``, ``"GLOBAL"``) — it is NOT the identity
+        document's country. It drives storage vault routing, retention and the
+        required trust services. Falls back to the tenant's default
+        jurisdiction, then the platform default.
+        """
         body: dict[str, Any] = {"customer_reference": customer_reference, "flow": flow}
         if metadata:
             body["metadata"] = metadata
+        if jurisdiction:
+            body["jurisdiction"] = jurisdiction
         response = self._http.post("/v1/kyc/sessions", json=body, headers=self._auth_headers())
         return _json_or_raise(response, "Session creation failed")
 
@@ -106,6 +116,7 @@ class EkycClient:
             session_id=data.get("session_id", session_id),
             status=data.get("status", "UNKNOWN"),
             flow=data.get("flow"),
+            jurisdiction=data.get("jurisdiction"),
             identity=data.get("identity"),
             checks=data.get("checks", {}),
             raw=data,

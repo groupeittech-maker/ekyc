@@ -58,6 +58,31 @@ Les providers sont pluggables (`app/engines/providers/`) : `stub` déterministe 
 développement, MRZ TD3 réel avec chiffres de contrôle, Tesseract optionnel, sender OTP HTTP.
 Brancher un fournisseur commercial revient à implémenter l'interface de `providers/base.py`.
 
+### 3 bis. Orchestrateur réglementaire (`app/engines/orchestrator.py`)
+
+Le routage réglementaire est une **politique explicite**, jamais déduit du document :
+un assuré ivoirien peut présenter un passeport congolais — pays du document, pays de
+l'assureur et lieu de traitement sont trois choses différentes.
+
+Résolution de la juridiction applicable à la création de session :
+
+1. `jurisdiction` dans `POST /v1/kyc/sessions` (le tenant affirme le contexte) ;
+2. `tenant.default_jurisdiction` (marché d'origine du tenant) ;
+3. `EKYC_DEFAULT_JURISDICTION` (`GLOBAL` par défaut).
+
+Le profil résolu — `jurisdiction`, `vault_profile`, `retention_days`, `tsa_policy`,
+`signature_level` — est **figé sur la session** et hashé dans la chaîne d'audit
+(`jurisdiction_source` inclus : `request | tenant_default | platform_default`).
+
+- **Vaults** : `EKYC_VAULTS_JSON` déclare des stockages nommés (root local ou bucket S3,
+  potentiellement sur d'autres VPS). `storage.get_vault(name)` résout le backend ;
+  chaque artefact de la session y est routé et enregistre son `vault_profile`.
+- **TSA** : `tsa_policy: "qualified"` force le RFC 3161 externe pour les documents scellés
+  de la session ; `"internal"` garde l'horodatage logiciel marqué non qualifié.
+- **Règles** : registre code dans `orchestrator._RULES`, surcharge/ajout sans code via
+  `EKYC_JURISDICTIONS_JSON` — c'est ce qui permet de ne déployer que les coffres et
+  profils nécessaires dans chaque marché.
+
 ## 4. Chaîne de preuve
 
 ### 4 bis. Coffre de données (chiffrement au repos)

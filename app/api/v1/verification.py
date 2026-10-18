@@ -98,6 +98,7 @@ async def upload_document(
         filename=file.filename or "document",
         data=data,
         content_type=file.content_type or "application/octet-stream",
+        vault_profile=session.vault_profile,
     )
     document = Document(
         session_id=session.id,
@@ -145,6 +146,7 @@ async def upload_selfie(
         filename=file.filename or "selfie",
         data=data,
         content_type=file.content_type or "application/octet-stream",
+        vault_profile=session.vault_profile,
     )
     record_event(
         db,

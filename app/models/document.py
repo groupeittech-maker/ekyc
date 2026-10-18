@@ -25,6 +25,8 @@ class Artifact(Base):
     )
     kind: Mapped[str] = mapped_column(String(32))
     storage_key: Mapped[str] = mapped_column(String(500))
+    # Vault profile the blob was routed to (regulatory separation).
+    vault_profile: Mapped[str] = mapped_column(String(64), default="default")
     content_type: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[str] = mapped_column(String(64), index=True)

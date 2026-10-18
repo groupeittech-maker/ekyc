@@ -26,6 +26,8 @@ class TenantCreateRequest(BaseModel):
     allowed_flows: list[str] = Field(default_factory=list)
     branding: dict[str, Any] = Field(default_factory=dict)
     retention_days: int = 3650
+    # Tenant's home jurisdiction — used when a session does not assert one.
+    default_jurisdiction: str | None = None
 
 
 class TenantCredentialsResponse(BaseModel):
@@ -40,12 +42,17 @@ class SessionCreateRequest(BaseModel):
     flow: str
     customer_reference: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Regulatory context of the operation (e.g. "CI", "EU", "GLOBAL"), asserted
+    # by the tenant — NOT the document's country. Falls back to the tenant's
+    # default jurisdiction, then the platform default.
+    jurisdiction: str | None = None
 
 
 class SessionCreateResponse(BaseModel):
     session_id: str
     status: str
     flow: str
+    jurisdiction: str
     verification_url: str
     expires_at: datetime
 
@@ -54,6 +61,7 @@ class SessionResultResponse(BaseModel):
     session_id: str
     customer_reference: str | None
     flow: str
+    jurisdiction: str
     status: str
     checks: dict[str, str]
     reasons: list[str]

@@ -42,7 +42,11 @@ client = EkycClient(
 )
 
 # 1. Create a session and redirect the end-user to verification_url
-session = client.create_session(customer_reference="APP-123456", flow="TRAVEL_INSURANCE")
+session = client.create_session(
+    customer_reference="APP-123456",
+    flow="TRAVEL_INSURANCE",
+    jurisdiction="CI",  # regulatory context (optional) — NOT the document's country
+)
 redirect_to = session["verification_url"]
 
 # 2. Later (webhook is preferred; polling is a fallback)

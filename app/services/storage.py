@@ -92,6 +92,52 @@ def get_storage() -> StorageBackend:
     return _backend
 
 
+# --------------------------------------------------------------------------- #
+# Vaults: named storage targets selected by the regulatory orchestrator.
+# "default" is the primary backend; extra vaults come from EKYC_VAULTS_JSON —
+# each can point at a different root, bucket or host (regulatory separation).
+# --------------------------------------------------------------------------- #
+class UnknownVaultError(RuntimeError):
+    """Raised when a session's resolved vault profile is not configured."""
+
+
+def vault_configs() -> dict[str, dict[str, str]]:
+    if not settings.vaults_json:
+        return {}
+    import json
+
+    parsed = json.loads(settings.vaults_json)
+    if not isinstance(parsed, dict):
+        raise UnknownVaultError("EKYC_VAULTS_JSON must be a JSON object")
+    return parsed
+
+
+_vaults: dict[str, StorageBackend] = {}
+
+
+def get_vault(profile: str | None) -> StorageBackend:
+    """Resolve a vault profile name to a storage backend (cached)."""
+    name = profile or "default"
+    if name == "default":
+        return get_storage()
+    if name in _vaults:
+        return _vaults[name]
+    cfg = vault_configs().get(name)
+    if cfg is None:
+        raise UnknownVaultError(
+            f"Vault '{name}' is not configured "
+            f"(configured: default, {', '.join(sorted(vault_configs())) or 'none'})"
+        )
+    backend = cfg.get("backend", "local")
+    if backend == "s3":
+        _vaults[name] = S3Storage(
+            cfg.get("bucket", ""), cfg.get("endpoint_url", ""), cfg.get("region", "")
+        )
+    else:
+        _vaults[name] = LocalStorage(cfg["root"])
+    return _vaults[name]
+
+
 def build_key(tenant_id: str, session_id: str, kind: str, filename: str) -> str:
     day = datetime.now(timezone.utc).strftime("%Y/%m/%d")
     return f"tenant/{tenant_id}/{day}/{session_id}/{kind.lower()}/{filename}"

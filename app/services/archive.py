@@ -14,7 +14,7 @@ from app.core.hashing import sha256_bytes
 from app.models.document import Artifact
 from app.models.enums import ArtifactKind
 from app.services import vault
-from app.services.storage import build_key, get_storage
+from app.services.storage import build_key, get_vault
 
 
 def store_artifact(
@@ -26,15 +26,17 @@ def store_artifact(
     filename: str,
     data: bytes,
     content_type: str = "application/octet-stream",
+    vault_profile: str | None = None,
 ) -> Artifact:
     key = build_key(tenant_id, session_id or "unscoped", str(kind), filename)
     payload = vault.seal(tenant_id, data) if settings.storage_encryption else data
-    get_storage().put(key, payload, content_type)
+    get_vault(vault_profile).put(key, payload, content_type)
     artifact = Artifact(
         tenant_id=tenant_id,
         session_id=session_id,
         kind=str(kind),
         storage_key=key,
+        vault_profile=vault_profile or "default",
         content_type=content_type,
         size_bytes=len(data),
         sha256=sha256_bytes(data),
@@ -46,4 +48,6 @@ def store_artifact(
 
 def read_artifact(artifact: Artifact) -> bytes:
     # vault.open() passes legacy plaintext through and decrypts sealed blobs.
-    return vault.open(artifact.tenant_id, get_storage().get(artifact.storage_key))
+    return vault.open(
+        artifact.tenant_id, get_vault(artifact.vault_profile).get(artifact.storage_key)
+    )

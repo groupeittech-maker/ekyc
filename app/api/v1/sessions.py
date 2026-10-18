@@ -10,6 +10,7 @@ from app.api.deps import CurrentTenant, DbSession, client_ip, get_tenant_session
 from app.core.config import settings
 from app.db.base import utcnow
 from app.engines import audit
+from app.engines.orchestrator import UnknownJurisdictionError
 from app.engines.policy import UnknownFlowError
 from app.models.document import Artifact
 from app.models.session import KycSession
@@ -26,6 +27,7 @@ from app.schemas import (
 from app.services import evidence, kyc
 from app.services.archive import read_artifact
 from app.services.pdf import render_contract, render_kyc_certificate
+from app.services.storage import UnknownVaultError, get_vault
 
 router = APIRouter(prefix="/kyc/sessions", tags=["kyc"])
 
@@ -43,9 +45,17 @@ def create_session(
             flow=payload.flow,
             customer_reference=payload.customer_reference,
             metadata=payload.metadata,
+            jurisdiction=payload.jurisdiction,
             ip=client_ip(request),
         )
+        # Fail early when the resolved vault is not deployed: better a 400 on
+        # creation than a 500 when the first artifact is written.
+        get_vault(session.vault_profile)
     except UnknownFlowError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except UnknownJurisdictionError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except UnknownVaultError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
@@ -55,6 +65,7 @@ def create_session(
         session_id=session.id,
         status=str(session.status),
         flow=session.flow,
+        jurisdiction=session.jurisdiction,
         verification_url=kyc.verification_url(session, token),
         expires_at=session.expires_at,
     )
@@ -119,7 +130,8 @@ def kyc_certificate(session: TenantSession, db: DbSession, tenant: CurrentTenant
             pdf_bytes=pdf,
             document_reference=CERTIFICATE_REFERENCE,
             filename=f"{session.id}-certificate.pdf",
-            qualified_timestamp=settings.tsa_qualified_certificates,
+            qualified_timestamp=settings.tsa_qualified_certificates
+            or session.tsa_policy == "qualified",
         )
         db.commit()
 

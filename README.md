@@ -49,10 +49,18 @@ Le client ne pilote pas les étapes. Il crée une session et reçoit un résulta
 
 ```bash
 POST /v1/kyc/sessions
-{"customer_reference": "MHC-123456", "flow": "TRAVEL_INSURANCE"}
+{"customer_reference": "MHC-123456", "flow": "TRAVEL_INSURANCE", "jurisdiction": "CI"}
 
-→ {"session_id": "KYC-2026-0000A1B2", "status": "CREATED", "verification_url": "https://…/verify/KYC-…?token=…"}
+→ {"session_id": "KYC-2026-0000A1B2", "status": "CREATED", "jurisdiction": "CI", "verification_url": "https://…/verify/KYC-…?token=…"}
 ```
+
+`jurisdiction` (optionnel) affirme le **contexte réglementaire de l'opération** —
+ce n'est PAS le pays du document : un assuré ivoirien peut présenter un passeport
+congolais. L'orchestrateur résout `jurisdiction → coffre (VPS) + rétention +
+services de confiance (TSA, signature)` et fige ce profil sur la session, hashé
+dans la chaîne d'audit. Ordre de résolution : champ de la requête →
+`default_jurisdiction` du tenant → `EKYC_DEFAULT_JURISDICTION`. Vaults et règles
+par pays : `EKYC_VAULTS_JSON` / `EKYC_JURISDICTIONS_JSON` (voir ARCHITECTURE §3bis).
 
 Le client ouvre la `verification_url` (UI hébergée par l'eKYC), puis récupère le résultat par
 webhook signé et/ou `GET /v1/kyc/sessions/{session_id}` :

@@ -39,9 +39,14 @@ def seal_document(
     pdf_bytes: bytes,
     document_reference: str | None = None,
     filename: str = "document.pdf",
-    qualified_timestamp: bool = False,
+    qualified_timestamp: bool | None = None,
 ) -> SignedDocument:
     tenant_id = session.tenant_id
+    # The session's regulatory profile chooses the trust services; callers may
+    # still force a qualified timestamp (e.g. the final KYC certificate).
+    if qualified_timestamp is None:
+        qualified_timestamp = session.tsa_policy == "qualified"
+    vault = session.vault_profile
 
     source = store_artifact(
         db,
@@ -51,6 +56,7 @@ def seal_document(
         filename=filename,
         data=pdf_bytes,
         content_type="application/pdf",
+        vault_profile=vault,
     )
     audit.record_event(
         db,
@@ -93,6 +99,7 @@ def seal_document(
         filename=f"{digest[:16]}.tsr",
         data=token.token,
         content_type="application/timestamp-reply",
+        vault_profile=vault,
     )
     audit.record_event(
         db,
@@ -129,6 +136,7 @@ def seal_document(
         filename=f"signed_{filename}",
         data=sealed_bytes,
         content_type="application/pdf",
+        vault_profile=vault,
     )
     audit.record_event(
         db,

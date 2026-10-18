@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     kek_version: int = 1  # bump to rotate DEKs; old blobs stay decryptable
     kms_backend: str = "local"  # local | (aws-kms/vault: implement KeyProvider)
 
+    # Regulatory orchestrator: jurisdiction rules and vault topology.
+    default_jurisdiction: str = "GLOBAL"
+    # Extra vaults beyond "default", JSON object:
+    # {"vps-abidjan": {"backend": "local", "root": "/srv/ci/storage"},
+    #  "s3-eu": {"backend": "s3", "bucket": "ekyc-eu",
+    #            "endpoint_url": "https://s3.eu-west-1.amazonaws.com", "region": "eu-west-1"}}
+    vaults_json: str = ""
+    # Extra/overriding jurisdiction rules, JSON object (see orchestrator.py).
+    jurisdictions_json: str = ""
+
     ocr_provider: str = "stub"  # stub | tesseract | inhouse
     face_provider: str = "stub"  # stub | inhouse
     otp_provider: str = "log"  # log | http

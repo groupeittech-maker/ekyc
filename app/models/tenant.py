@@ -23,5 +23,7 @@ class Tenant(Base):
     allowed_flows: Mapped[list[str]] = mapped_column(JSON, default=list)
     branding: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     retention_days: Mapped[int] = mapped_column(Integer, default=3650)
+    # Tenant's home jurisdiction — used when a session does not assert one.
+    default_jurisdiction: Mapped[str | None] = mapped_column(String(16), default=None)
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

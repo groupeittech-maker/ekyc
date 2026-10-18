@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.ids import new_session_id
 from app.core.security import new_session_access_token, verify_secret
 from app.db.base import utcnow
-from app.engines import audit
+from app.engines import audit, orchestrator
 from app.engines.decision import decidable_steps, decide
 from app.engines.policy import FlowPolicy, get_policy
 from app.models.enums import AuditEventType, CheckStatus, SessionStatus, Step
@@ -34,11 +34,16 @@ def create_session(
     flow: str,
     customer_reference: str | None,
     metadata: dict[str, Any] | None = None,
+    jurisdiction: str | None = None,
     ip: str | None = None,
 ) -> tuple[KycSession, str]:
     policy = get_policy(flow)
     if tenant.allowed_flows and flow not in tenant.allowed_flows:
         raise PermissionError(f"Flow {flow} is not enabled for this tenant")
+
+    # Regulatory orchestration: explicit policy, snapshotted on the session
+    # and hashed into the audit chain — never inferred from the document.
+    profile = orchestrator.resolve(tenant, requested=jurisdiction)
 
     token, token_hash = new_session_access_token()
     session = KycSession(
@@ -49,6 +54,11 @@ def create_session(
         status=SessionStatus.CREATED,
         access_token_hash=token_hash,
         expires_at=utcnow() + timedelta(seconds=settings.session_ttl_seconds),
+        jurisdiction=profile.jurisdiction,
+        vault_profile=profile.vault_profile,
+        retention_days=profile.retention_days,
+        tsa_policy=profile.tsa_policy,
+        signature_level=profile.signature_level,
         identity={},
         checks={str(step): CheckStatus.PENDING for step in decidable_steps(policy)},
         internal={},
@@ -63,7 +73,16 @@ def create_session(
         tenant_id=tenant.id,
         session_id=session.id,
         event_type=AuditEventType.KYC_SESSION_CREATED,
-        payload={"flow": policy.name, "customer_reference": customer_reference},
+        payload={
+            "flow": policy.name,
+            "customer_reference": customer_reference,
+            "jurisdiction": profile.jurisdiction,
+            "jurisdiction_source": profile.source,
+            "vault_profile": profile.vault_profile,
+            "retention_days": profile.retention_days,
+            "tsa_policy": profile.tsa_policy,
+            "signature_level": profile.signature_level,
+        },
         actor="TENANT",
         ip=ip,
     )
@@ -162,6 +181,7 @@ def public_result(session: KycSession, *, include_identity: bool = True) -> dict
         "session_id": session.id,
         "customer_reference": session.customer_reference,
         "flow": session.flow,
+        "jurisdiction": session.jurisdiction,
         "status": session.status,
         "checks": session.checks,
         "reasons": session.reasons,

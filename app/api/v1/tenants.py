@@ -29,6 +29,7 @@ def create_tenant(payload: TenantCreateRequest, db: DbSession) -> TenantCredenti
         allowed_flows=payload.allowed_flows,
         branding=payload.branding,
         retention_days=payload.retention_days,
+        default_jurisdiction=payload.default_jurisdiction,
     )
     db.add(tenant)
     db.commit()

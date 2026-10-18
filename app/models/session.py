@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, String
+from sqlalchemy import JSON, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UTCDateTime, utcnow
@@ -20,6 +20,13 @@ class KycSession(Base):
 
     access_token_hash: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    # Regulatory context — snapshotted at creation by the orchestrator.
+    jurisdiction: Mapped[str] = mapped_column(String(16), default="GLOBAL")
+    vault_profile: Mapped[str] = mapped_column(String(64), default="default")
+    retention_days: Mapped[int] = mapped_column(Integer, default=3650)
+    tsa_policy: Mapped[str] = mapped_column(String(32), default="internal")
+    signature_level: Mapped[str] = mapped_column(String(32), default="platform")
 
     # Structured identity extracted and consolidated by the identity engine.
     identity: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
