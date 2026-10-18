@@ -18,12 +18,23 @@ _KEK = "ab" * 32  # fixed test KEK: deterministic DEKs
 
 @pytest.fixture
 def vault_on(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setattr(settings, "storage_encryption_enabled", True)
+    monkeypatch.setattr(settings, "storage_encryption", True)
     monkeypatch.setattr(settings, "kek", _KEK)
     monkeypatch.setattr(settings, "kek_version", 1)
     vault.get_key_provider.cache_clear()
     yield
     vault.get_key_provider.cache_clear()
+
+
+def test_settings_bind_ekyc_env_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Regression: env prefix + field name must produce EKYC_STORAGE_ENCRYPTION.
+    from app.core.config import Settings
+
+    monkeypatch.setenv("EKYC_STORAGE_ENCRYPTION", "true")
+    monkeypatch.setenv("EKYC_KEK", _KEK)
+    fresh = Settings()
+    assert fresh.storage_encryption is True
+    assert fresh.kek == _KEK
 
 
 def test_seal_open_roundtrip(vault_on: None) -> None:

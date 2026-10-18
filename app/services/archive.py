@@ -28,7 +28,7 @@ def store_artifact(
     content_type: str = "application/octet-stream",
 ) -> Artifact:
     key = build_key(tenant_id, session_id or "unscoped", str(kind), filename)
-    payload = vault.seal(tenant_id, data) if settings.storage_encryption_enabled else data
+    payload = vault.seal(tenant_id, data) if settings.storage_encryption else data
     get_storage().put(key, payload, content_type)
     artifact = Artifact(
         tenant_id=tenant_id,
