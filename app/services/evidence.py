@@ -117,11 +117,16 @@ def seal_document(
         document_hash=digest,
     )
 
+    consent = session.consent or {}
     sealed_bytes = _embed_evidence(
         pdf_bytes,
         {
             "KycSessionId": session.id,
+            "Jurisdiction": session.jurisdiction,
             "DocumentReference": document_reference or "",
+            "ConsentGiven": consent.get("accepted", ""),
+            "ConsentAt": consent.get("at", ""),
+            "ConsentPolicyVersion": consent.get("policy_version", ""),
             "DocumentSha256": digest,
             "Signature": signature.b64,
             "SignatureAlgorithm": signature.algorithm,
@@ -168,6 +173,7 @@ def seal_document(
         timestamp_details={
             "qualified": token.qualified,
             "provider": token.provider,
+            "issued_at": token.issued_at,
             **token.details,
         },
     )

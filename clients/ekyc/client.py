@@ -133,6 +133,16 @@ class EkycClient:
                 return result
             time.sleep(interval)
 
+    def verify_document(self, sha256: str) -> dict[str, Any]:
+        """Public proof check: did the platform seal a document with this hash?
+
+        Returns ``{"found": bool, ...}`` plus live cryptographic verification
+        of the signature and timestamp token — usable by any third party,
+        no authentication required.
+        """
+        response = self._http.get(f"/v1/verify/{sha256}")
+        return _json_or_raise(response, "Document verification failed")
+
     def get_audit_export(self, session_id: str) -> dict[str, Any]:
         """Return the chained audit trail plus its integrity verification."""
         response = self._http.get(

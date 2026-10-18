@@ -68,6 +68,25 @@ def test_sdk_seals_and_downloads_a_document(sdk: EkycClient) -> None:
     assert artifact.sha256 == sealed["sha256"]
 
 
+def test_sdk_verify_document_is_public(sdk: EkycClient) -> None:
+    session = sdk.create_session(customer_reference="APP-4", flow="TRAVEL_INSURANCE")
+    pdf_bytes = render_contract(
+        title="Doc",
+        session_id=session["session_id"],
+        tenant_name="SDK Test",
+        body=[("f", "v")],
+        issued_at="2026-10-18T00:00:00",
+    )
+    sealed = sdk.seal_document(
+        session["session_id"], document_reference="VER-1", pdf_bytes=pdf_bytes
+    )
+
+    result = sdk.verify_document(sealed["sha256"])
+    assert result["found"] is True
+    assert result["signature"]["verified"] is True
+    assert sdk.verify_document("0" * 64)["found"] is False
+
+
 def test_sdk_downloads_the_kyc_certificate(sdk: EkycClient) -> None:
     session = sdk.create_session(customer_reference="APP-3", flow="TRAVEL_INSURANCE")
     cert = sdk.download_certificate(session["session_id"])

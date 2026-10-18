@@ -74,6 +74,7 @@ pdf = client.download_signed_document(session["session_id"], signed["signed_docu
 | `seal_document(...)` | `POST /v1/kyc/sessions/{id}/documents` | Bearer |
 | `download_signed_document(...)` | `GET /v1/kyc/sessions/{id}/documents/{doc}` | Bearer |
 | `download_certificate(session_id)` | `GET /v1/kyc/sessions/{id}/certificate` | Bearer |
+| `verify_document(sha256)` | `GET /v1/verify/{sha256}` | public — proof check for any third party |
 | `verify_webhook(...)` | local HMAC check | — |
 
 ## Webhooks

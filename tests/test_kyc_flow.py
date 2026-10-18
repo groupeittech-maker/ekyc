@@ -22,6 +22,15 @@ def session_headers(verification_url: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {query['token'][0]}"}
 
 
+def give_consent(client: TestClient, headers: dict, base: str) -> None:
+    response = client.post(
+        f"{base}/consent",
+        headers=headers,
+        json={"accepted": True, "policy_version": "v1"},
+    )
+    assert response.status_code == 200, response.text
+
+
 def run_full_flow(
     client: TestClient,
     tenant_token: str,
@@ -33,6 +42,7 @@ def run_full_flow(
     headers = session_headers(session["verification_url"])
     base = f"/v1/verification/{session['session_id']}"
 
+    give_consent(client, headers, base)
     client.post(
         f"{base}/document",
         headers=headers,
@@ -93,8 +103,9 @@ def test_ocr_parses_mrz_and_audit_chain_is_verifiable(
 
     assert audit["integrity"]["valid"] is True
     event_types = [event["event_type"] for event in audit["events"]]
-    assert event_types[:4] == [
+    assert event_types[:5] == [
         "KYC_SESSION_CREATED",
+        "CONSENT_GIVEN",
         "DOCUMENT_UPLOADED",
         "OCR_COMPLETED",
         "DOCUMENT_VERIFIED",
@@ -110,6 +121,7 @@ def test_failed_liveness_rejects_the_session(
     headers = session_headers(session["verification_url"])
     base = f"/v1/verification/{session['session_id']}"
 
+    give_consent(client, headers, base)
     client.post(
         f"{base}/document",
         headers=headers,

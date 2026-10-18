@@ -10,7 +10,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
-from app.api.deps import DbSession, client_ip, get_verification_session, require_open
+from app.api.deps import (
+    DbSession,
+    client_ip,
+    get_verification_session,
+    require_open,
+)
 from app.core.config import settings
 from app.engines import otp as otp_engine
 from app.engines.audit import record_event
@@ -19,6 +24,8 @@ from app.models.enums import ArtifactKind, AuditEventType, DocumentType, Step
 from app.models.session import KycSession
 from app.models.tenant import Tenant
 from app.schemas import (
+    ConsentRequest,
+    ConsentResponse,
     DocumentUploadResponse,
     OtpSendRequest,
     OtpSendResponse,
@@ -54,6 +61,13 @@ def _step_result(db: DbSession, session: KycSession) -> StepResultResponse:
     )
 
 
+def _require_consent(session: KycSession) -> None:
+    try:
+        kyc.require_consent(session)
+    except kyc.ConsentRequiredError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, "CONSENT_REQUIRED") from exc
+
+
 @router.get("/context", response_model=SessionContextResponse)
 def context(session: VerificationSession, db: DbSession) -> SessionContextResponse:
     policy = kyc.policy_of(session)
@@ -67,8 +81,39 @@ def context(session: VerificationSession, db: DbSession) -> SessionContextRespon
         accepted_documents=[str(doc) for doc in policy.accepted_documents],
         checks=session.checks,
         branding=tenant.branding if tenant else {},
+        consent={
+            "required": policy.requires_consent,
+            "given": bool((session.consent or {}).get("accepted")),
+            "policy_version": (session.consent or {}).get("policy_version"),
+        },
         expires_at=session.expires_at,
     )
+
+
+@router.post("/consent", response_model=ConsentResponse)
+def consent(
+    payload: ConsentRequest,
+    session: VerificationSession,
+    db: DbSession,
+    request: Request,
+) -> ConsentResponse:
+    require_open(session)
+    if not kyc.policy_of(session).requires_consent:
+        # Flow doesn't gate on consent — accepting anyway is harmless.
+        pass
+    if payload.accepted:
+        kyc.grant_consent(
+            db,
+            session,
+            policy_version=payload.policy_version,
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+        db.commit()
+        return ConsentResponse(accepted=True, **_step_result(db, session).model_dump())
+    kyc.decline_consent(db, session, policy_version=payload.policy_version, ip=client_ip(request))
+    db.commit()
+    raise HTTPException(status.HTTP_409_CONFLICT, "CONSENT_DECLINED")
 
 
 @router.post(
@@ -82,6 +127,7 @@ async def upload_document(
     file: Annotated[UploadFile, File()],
 ) -> DocumentUploadResponse:
     require_open(session)
+    _require_consent(session)
     policy = kyc.policy_of(session)
     if document_type not in policy.accepted_documents:
         raise HTTPException(
@@ -137,6 +183,7 @@ async def upload_selfie(
     file: Annotated[UploadFile, File()],
 ) -> StepResultResponse:
     require_open(session)
+    _require_consent(session)
     data = await _read_upload(file)
     artifact = store_artifact(
         db,
@@ -171,6 +218,7 @@ def send_otp(
     payload: OtpSendRequest, session: VerificationSession, db: DbSession
 ) -> OtpSendResponse:
     require_open(session)
+    _require_consent(session)
     if not kyc.policy_of(session).requires(Step.OTP):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP is not part of this flow")
     challenge = otp_engine.send_otp(db, session, payload.channel, payload.destination)

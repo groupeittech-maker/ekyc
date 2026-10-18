@@ -80,7 +80,13 @@ class SessionContextResponse(BaseModel):
     accepted_documents: list[str]
     checks: dict[str, str]
     branding: dict[str, Any]
+    consent: dict[str, Any] = Field(default_factory=dict)
     expires_at: datetime
+
+
+class ConsentRequest(BaseModel):
+    accepted: bool
+    policy_version: str = "v1"
 
 
 class OtpSendRequest(BaseModel):
@@ -107,6 +113,10 @@ class StepResultResponse(BaseModel):
     session_id: str
     status: str
     checks: dict[str, str]
+
+
+class ConsentResponse(StepResultResponse):
+    accepted: bool
 
 
 class DocumentUploadResponse(StepResultResponse):

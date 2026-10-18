@@ -18,6 +18,8 @@ class FlowPolicy:
     # Steps that put the session in REVIEW instead of REJECTED when they fail.
     review_on_failure: frozenset[Step] = field(default_factory=frozenset)
     requires_signature: bool = False
+    # End-user consent gates data capture — on for every flow by default.
+    requires_consent: bool = True
 
     def requires(self, step: Step) -> bool:
         return step in self.steps

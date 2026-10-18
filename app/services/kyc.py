@@ -27,6 +27,60 @@ class SessionClosedError(RuntimeError):
     pass
 
 
+class ConsentRequiredError(RuntimeError):
+    pass
+
+
+def grant_consent(
+    db: Session,
+    session: KycSession,
+    *,
+    policy_version: str,
+    ip: str | None,
+    user_agent: str | None,
+) -> None:
+    session.consent = {
+        "accepted": True,
+        "at": utcnow().isoformat(),
+        "policy_version": policy_version,
+        "ip": ip,
+        "user_agent": user_agent,
+    }
+    session.updated_at = utcnow()
+    audit.record_event(
+        db,
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        event_type=AuditEventType.CONSENT_GIVEN,
+        payload={"policy_version": policy_version},
+        actor="END_USER",
+        ip=ip,
+    )
+    db.flush()
+
+
+def decline_consent(
+    db: Session, session: KycSession, *, policy_version: str, ip: str | None
+) -> None:
+    audit.record_event(
+        db,
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        event_type=AuditEventType.CONSENT_DECLINED,
+        payload={"policy_version": policy_version},
+        actor="END_USER",
+        ip=ip,
+    )
+    db.flush()
+
+
+def require_consent(session: KycSession) -> None:
+    """Capture steps are gated on explicit end-user consent when the flow
+    requires it — consent is part of the evidence dossier, not a formality."""
+    if policy_of(session).requires_consent and not (session.consent or {}).get("accepted"):
+        raise ConsentRequiredError("End-user consent is required before data capture")
+
+
 def create_session(
     db: Session,
     *,

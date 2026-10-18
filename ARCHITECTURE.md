@@ -86,6 +86,18 @@ Le profil résolu — `jurisdiction`, `vault_profile`, `retention_days`, `tsa_po
 
 ## 4. Chaîne de preuve
 
+Le dossier de preuve embarque : résultats eKYC, empreintes SHA-256, signature RSA
+(provider + empreinte de certificat), horodatage (provider + qualifié ou honnêtement
+non qualifié), **consentement de l'utilisateur** (`accepted`, `at`, `policy_version` —
+la capture est bloquée tant qu'il n'est pas donné ; `CONSENT_GIVEN`/`CONSENT_DECLINED`
+sont hashés dans la chaîne), juridiction, et journal d'audit chaîné.
+
+**Vérification par un tiers** : `GET /v1/verify/{sha256}` (public) confirme qu'un
+document a été scellé par la plateforme — signature vérifiée en direct avec la clé de
+signature, jeton d'horodatage vérifié (signature interne ou structure RFC 3161 +
+empreinte). Seules les métadonnées de confiance sont exposées, pas de données tenant
+ni d'identité.
+
 ### 4 bis. Coffre de données (chiffrement au repos)
 
 `EKYC_STORAGE_ENCRYPTION=true` active le coffre (`app/services/vault.py`) : chaque artefact est

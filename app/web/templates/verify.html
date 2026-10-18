@@ -38,8 +38,23 @@
 <main>
   <p class="error" id="error"></p>
 
+  <section id="step-consent" hidden>
+    <h2>1. Consentement</h2>
+    <p class="muted">
+      Pour verifier votre identite, nous traitons votre document d'identite et,
+      si necessaire, vos donnees biometriques. Vos donnees sont chiffrees,
+      conservees dans un coffre dedie et jamais transmises au commercant.
+      Le traitement est trace dans un journal d'audit horodate.
+    </p>
+    <label style="display:flex;gap:10px;align-items:flex-start;font-weight:500;">
+      <input type="checkbox" id="consent-check" style="width:auto;margin-top:2px;" />
+      <span>J'accepte que mes donnees soient traitees pour verifier mon identite.</span>
+    </label>
+    <button id="consent-submit">Continuer</button>
+  </section>
+
   <section id="step-document">
-    <h2>1. Document d'identite</h2>
+    <h2>2. Document d'identite</h2>
     <label for="document-type">Type de document</label>
     <select id="document-type"></select>
     <label for="document-file">Photo du document</label>
@@ -48,13 +63,13 @@
   </section>
 
   <section id="step-selfie" hidden>
-    <h2>2. Selfie et preuve de vie</h2>
+    <h2>3. Selfie et preuve de vie</h2>
     <input type="file" id="selfie-file" accept="image/*,text/plain" capture="user" />
     <button id="selfie-submit">Envoyer le selfie</button>
   </section>
 
   <section id="step-otp" hidden>
-    <h2>3. Code de verification</h2>
+    <h2>4. Code de verification</h2>
     <label for="otp-destination">Numero de telephone ou email</label>
     <input type="text" id="otp-destination" placeholder="+242 06 000 00 00" />
     <button id="otp-send">Recevoir le code</button>
@@ -84,6 +99,8 @@ const headers = { Authorization: `Bearer ${token}` };
 const $ = (id) => document.getElementById(id);
 
 let steps = [];
+let consentRequired = false;
+let consentGiven = false;
 
 const TERMINAL = {
   VERIFIED: "Votre identite est verifiee. Vous pouvez revenir a l'application.",
@@ -115,12 +132,14 @@ function refreshVisibility(checks, status) {
   $("final").hidden = !finalMessage;
   if (finalMessage) {
     $("final-message").textContent = finalMessage;
-    for (const step of ["step-document", "step-selfie", "step-otp"]) $(step).hidden = true;
+    for (const step of ["step-consent", "step-document", "step-selfie", "step-otp"]) $(step).hidden = true;
     return;
   }
-  $("step-document").hidden = done("DOCUMENT_VERIFICATION");
-  $("step-selfie").hidden = !steps.includes("LIVENESS") || !done("DOCUMENT_VERIFICATION") || done("LIVENESS");
-  $("step-otp").hidden = !steps.includes("OTP") || done("OTP")
+  const captureBlocked = consentRequired && !consentGiven;
+  $("step-consent").hidden = !captureBlocked;
+  $("step-document").hidden = captureBlocked || done("DOCUMENT_VERIFICATION");
+  $("step-selfie").hidden = captureBlocked || !steps.includes("LIVENESS") || !done("DOCUMENT_VERIFICATION") || done("LIVENESS");
+  $("step-otp").hidden = captureBlocked || !steps.includes("OTP") || done("OTP")
     || (steps.includes("LIVENESS") && !done("LIVENESS"));
 }
 
@@ -132,6 +151,8 @@ function update(state) {
 async function bootstrap() {
   const context = await call("/context");
   steps = context.steps;
+  consentRequired = !!(context.consent && context.consent.required);
+  consentGiven = !!(context.consent && context.consent.given);
   $("flow-label").textContent = context.flow_label;
   $("document-type").innerHTML = context.accepted_documents
     .map((doc) => `<option value="${doc}">${doc}</option>`).join("");
@@ -155,6 +176,17 @@ function bind(id, handler) {
     button.disabled = false;
   });
 }
+
+bind("consent-submit", async () => {
+  if (!$("consent-check").checked) throw new Error("Merci de confirmer votre consentement pour continuer");
+  await call("/consent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accepted: true, policy_version: "v1" }),
+  });
+  consentGiven = true;
+  return call("/status");
+});
 
 bind("document-submit", async () => {
   await upload("/document", $("document-file"));

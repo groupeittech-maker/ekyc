@@ -34,6 +34,9 @@ class KycSession(Base):
     checks: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # Internal scores and provider payloads; never exposed to tenants.
     internal: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # End-user consent to identity verification — evidence dossier element.
+    # {"accepted": true, "at": iso, "policy_version": str, "ip": str, "user_agent": str}
+    consent: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
 

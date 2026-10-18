@@ -62,7 +62,10 @@ dans la chaîne d'audit. Ordre de résolution : champ de la requête →
 `default_jurisdiction` du tenant → `EKYC_DEFAULT_JURISDICTION`. Vaults et règles
 par pays : `EKYC_VAULTS_JSON` / `EKYC_JURISDICTIONS_JSON` (voir ARCHITECTURE §3bis).
 
-Le client ouvre la `verification_url` (UI hébergée par l'eKYC), puis récupère le résultat par
+Le client ouvre la `verification_url` (UI hébergée par l'eKYC). Le parcours commence
+par un **consentement explicite** — la capture (document, selfie, OTP) est bloquée tant
+que l'utilisateur n'a pas accepté ; l'événement est hashé dans la chaîne d'audit et
+recopié dans les métadonnées du dossier de preuve. Le résultat est ensuite récupéré par
 webhook signé et/ou `GET /v1/kyc/sessions/{session_id}` :
 
 ```json
@@ -138,6 +141,7 @@ curl localhost:8000/v1/kyc/sessions/KYC-… -H "authorization: Bearer $TOKEN"
 | `GET /v1/kyc/sessions/{id}/certificate` | Certificat KYC PDF signé et horodaté |
 | `POST /v1/kyc/sessions/{id}/documents` | Sceller un contrat client : SHA-256 + signature + TSA + archivage |
 | `GET /v1/kyc/sessions/{id}/documents/{doc_id}` | Télécharger le document scellé |
+| `GET /v1/verify/{sha256}` | **Public** : vérifier une preuve par empreinte (signature + horodatage vérifiés en direct) |
 | `GET /verify/{id}?token=…` | UI de vérification hébergée (utilisateur final) |
 | `/v1/verification/{id}/…` | API de l'UI hébergée (jeton de session, portée : une session) |
 
