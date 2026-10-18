@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     # Extra/overriding jurisdiction rules, JSON object (see orchestrator.py).
     jurisdictions_json: str = ""
 
+    # Trust services: named external TSA providers, JSON object:
+    # {"digisign": {"endpoint": "https://tsa.example.com", "timeout_s": 10,
+    #               "qualified": true, "auth_header": "Bearer …",
+    #               "trusted_ca_path": "/srv/ekyc/tsa-ca.pem"}}
+    # A jurisdiction's tsa_policy may then name a provider ("digisign") or use
+    # the generic "qualified" (first qualified provider) / "internal" modes.
+    tsas_json: str = ""
+
     ocr_provider: str = "stub"  # stub | tesseract | inhouse
     face_provider: str = "stub"  # stub | inhouse
     otp_provider: str = "log"  # log | http

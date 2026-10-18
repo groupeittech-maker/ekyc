@@ -41,6 +41,10 @@ class Signer(ABC):
     @abstractmethod
     def certificate_fingerprint(self) -> str | None: ...
 
+    def certificate_not_after(self) -> dt.datetime | None:
+        """Signing-certificate expiry — lifecycle info for the evidence layer."""
+        return None
+
 
 class LocalKeySigner(Signer):
     def __init__(self) -> None:
@@ -126,6 +130,11 @@ class LocalKeySigner(Signer):
         if self._certificate is None:
             return None
         return self._certificate.fingerprint(hashes.SHA256()).hex()
+
+    def certificate_not_after(self) -> dt.datetime | None:
+        if self._certificate is None:
+            return None
+        return self._certificate.not_valid_after_utc
 
 
 @lru_cache

@@ -9,9 +9,11 @@ from sqlalchemy import select
 from app.api.deps import CurrentTenant, DbSession, client_ip, get_tenant_session
 from app.core.config import settings
 from app.db.base import utcnow
-from app.engines import audit
+from app.engines import audit, signature_manager, tsa
 from app.engines.orchestrator import UnknownJurisdictionError
 from app.engines.policy import UnknownFlowError
+from app.engines.signature_manager import UnknownSignerError
+from app.engines.tsa import UnknownTsaProviderError
 from app.models.document import Artifact
 from app.models.session import KycSession
 from app.models.signature import SignedDocument
@@ -48,14 +50,18 @@ def create_session(
             jurisdiction=payload.jurisdiction,
             ip=client_ip(request),
         )
-        # Fail early when the resolved vault is not deployed: better a 400 on
-        # creation than a 500 when the first artifact is written.
+        # Fail early when the resolved vault or trust services are not deployed:
+        # better a 400 on creation than a 500 when the first artifact is written.
         get_vault(session.vault_profile)
+        tsa.resolve_policy(session.tsa_policy)
+        signature_manager.resolve(session.signature_level)
     except UnknownFlowError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except UnknownJurisdictionError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except UnknownVaultError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except (UnknownTsaProviderError, UnknownSignerError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc

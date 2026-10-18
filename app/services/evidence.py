@@ -10,9 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.hashing import sha256_bytes
 from app.db.base import utcnow
-from app.engines import audit
-from app.engines.signature import sign_digest
-from app.engines.timestamp import request_timestamp
+from app.engines import audit, signature_manager, tsa
 from app.models.enums import ArtifactKind, AuditEventType
 from app.models.session import KycSession
 from app.models.signature import SignedDocument
@@ -45,7 +43,9 @@ def seal_document(
     # The session's regulatory profile chooses the trust services; callers may
     # still force a qualified timestamp (e.g. the final KYC certificate).
     if qualified_timestamp is None:
-        qualified_timestamp = session.tsa_policy == "qualified"
+        tsa_policy = session.tsa_policy
+    else:
+        tsa_policy = "qualified" if qualified_timestamp else "internal"
     vault = session.vault_profile
 
     source = store_artifact(
@@ -77,7 +77,7 @@ def seal_document(
         document_hash=digest,
     )
 
-    signature = sign_digest(bytes.fromhex(digest))
+    signature = signature_manager.sign(bytes.fromhex(digest), session.signature_level)
     audit.record_event(
         db,
         tenant_id=tenant_id,
@@ -86,11 +86,13 @@ def seal_document(
         payload={
             "algorithm": signature.algorithm,
             "certificate_fingerprint": signature.certificate_fingerprint,
+            "provider": signature.provider,
+            "signature_level": session.signature_level,
         },
         document_hash=digest,
     )
 
-    token = request_timestamp(digest, qualified=qualified_timestamp)
+    token = tsa.timestamp(digest, tsa_policy)
     token_artifact = store_artifact(
         db,
         tenant_id=tenant_id,
@@ -108,6 +110,7 @@ def seal_document(
         event_type=AuditEventType.TIMESTAMPED,
         payload={
             "authority": token.authority,
+            "provider": token.provider,
             "qualified": token.qualified,
             "issued_at": token.issued_at,
         },
@@ -122,8 +125,10 @@ def seal_document(
             "DocumentSha256": digest,
             "Signature": signature.b64,
             "SignatureAlgorithm": signature.algorithm,
+            "SignatureProvider": signature.provider,
             "CertificateFingerprint": signature.certificate_fingerprint or "",
             "TimestampAuthority": token.authority,
+            "TimestampProvider": token.provider,
             "TimestampedAt": token.issued_at,
             "TimestampQualified": token.qualified,
         },
@@ -160,7 +165,11 @@ def seal_document(
         timestamp_authority=token.authority,
         timestamp_token_artifact_id=token_artifact.id,
         timestamped_at=utcnow(),
-        timestamp_details={"qualified": token.qualified, **token.details},
+        timestamp_details={
+            "qualified": token.qualified,
+            "provider": token.provider,
+            **token.details,
+        },
     )
     db.add(signed)
     db.flush()

@@ -28,6 +28,7 @@ class Signature:
     value: bytes
     algorithm: str
     certificate_fingerprint: str | None
+    provider: str = ""
 
     @property
     def b64(self) -> str:
@@ -40,6 +41,7 @@ def sign_digest(payload: bytes) -> Signature:
         value=signer.sign(payload),
         algorithm=signer.algorithm,
         certificate_fingerprint=signer.certificate_fingerprint(),
+        provider=type(signer).__name__.replace("Signer", "").lower() or "platform",
     )
 
 

@@ -1,64 +1,22 @@
-"""Trusted timestamping.
+"""Trusted timestamping — compatibility wrapper.
 
-When an RFC 3161 TSA is configured the platform obtains a real timestamp token
-for the document digest. Otherwise it falls back to a *soft* timestamp signed
-by the platform key: usable for development, explicitly flagged as
-non-qualified so it is never mistaken for a TSA token.
+The provider registry, policy resolution (``internal`` / ``qualified`` /
+named provider) and token verification live in ``app.engines.tsa`` (TSA
+Manager). This module keeps the original API so existing call sites and
+tests keep working:
+
+* ``request_timestamp(digest, qualified=True)`` → qualified provider, with
+  honest fallback to the internal soft timestamp when no TSA is configured;
+* ``request_timestamp(digest, qualified=False)`` → internal soft timestamp,
+  always flagged ``qualified=False`` and ``NOT_A_QUALIFIED_TSA_TOKEN``.
 """
 
 from __future__ import annotations
 
-import base64
-from dataclasses import dataclass
-from typing import Any
+from app.engines.tsa import TimestampToken, timestamp
 
-import httpx
-
-from app.core.config import settings
-from app.db.base import utcnow
-
-
-@dataclass
-class TimestampToken:
-    token: bytes
-    authority: str
-    issued_at: str
-    qualified: bool
-    details: dict[str, Any]
-
-
-def _rfc3161_request(digest_hex: str) -> bytes:
-    from app.engines.asn1 import build_timestamp_request
-
-    return build_timestamp_request(bytes.fromhex(digest_hex))
+__all__ = ["TimestampToken", "request_timestamp"]
 
 
 def request_timestamp(digest_hex: str, *, qualified: bool = False) -> TimestampToken:
-    if qualified and settings.tsa_url:
-        response = httpx.post(
-            settings.tsa_url,
-            content=_rfc3161_request(digest_hex),
-            headers={"Content-Type": "application/timestamp-query"},
-            timeout=15.0,
-        )
-        response.raise_for_status()
-        return TimestampToken(
-            token=response.content,
-            authority=settings.tsa_url,
-            issued_at=utcnow().isoformat(),
-            qualified=True,
-            details={"content_type": response.headers.get("content-type", "")},
-        )
-
-    from app.engines.signature import sign_digest
-
-    issued_at = utcnow().isoformat()
-    payload = f"{digest_hex}|{issued_at}".encode()
-    signature = sign_digest(payload)
-    return TimestampToken(
-        token=base64.b64encode(signature.value),
-        authority="local-soft-timestamp",
-        issued_at=issued_at,
-        qualified=False,
-        details={"algorithm": signature.algorithm, "warning": "NOT_A_QUALIFIED_TSA_TOKEN"},
-    )
+    return timestamp(digest_hex, "qualified" if qualified else "internal")

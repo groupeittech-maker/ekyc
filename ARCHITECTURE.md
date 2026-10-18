@@ -47,8 +47,8 @@ L'UI n'utilise jamais le jeton du tenant : elle porte un jeton de session, limit
 | OTP | `app/engines/otp.py` | Envoi/vérification, code haché, jamais exposé |
 | Decision | `app/engines/decision.py` | Agrège les checks en `VERIFIED / REJECTED / REVIEW` |
 | Audit | `app/engines/audit.py` | Journal append-only chaîné |
-| Signature | `app/engines/signature.py` | RSASSA-PKCS1-v1_5-SHA256 sur l'empreinte |
-| Timestamp | `app/engines/timestamp.py` | RFC 3161 (TSA) ou fallback local marqué non qualifié |
+| Signature | `app/engines/signature_manager.py` | Registre de signataires (`platform` = RSA local ; un DSS/CA externe implémente `Signer`), cycle de vie du certificat (empreinte + expiration dans la preuve) |
+| Timestamp | `app/engines/tsa.py` | Registre TSA : interne (soft, non qualifié) ou connecteurs RFC 3161 nommés ; vérification des jetons (imprint, genTime, chaîne si CA de confiance) |
 
 La distinction demandée est respectée dans le modèle : OCR (« je lis »), document verification
 (« le document semble authentique ») et identity verification (« les informations correspondent à
@@ -77,8 +77,9 @@ Le profil résolu — `jurisdiction`, `vault_profile`, `retention_days`, `tsa_po
 - **Vaults** : `EKYC_VAULTS_JSON` déclare des stockages nommés (root local ou bucket S3,
   potentiellement sur d'autres VPS). `storage.get_vault(name)` résout le backend ;
   chaque artefact de la session y est routé et enregistre son `vault_profile`.
-- **TSA** : `tsa_policy: "qualified"` force le RFC 3161 externe pour les documents scellés
-  de la session ; `"internal"` garde l'horodatage logiciel marqué non qualifié.
+- **TSA** : `tsa_policy` sélectionne le fournisseur — `"internal"` (horodatage logiciel
+  marqué non qualifié), `"qualified"` (premier fournisseur qualifié configuré, repli
+  honnête sur l'interne sinon) ou le nom d'une TSA déclarée dans `EKYC_TSAS_JSON`.
 - **Règles** : registre code dans `orchestrator._RULES`, surcharge/ajout sans code via
   `EKYC_JURISDICTIONS_JSON` — c'est ce qui permet de ne déployer que les coffres et
   profils nécessaires dans chaque marché.
