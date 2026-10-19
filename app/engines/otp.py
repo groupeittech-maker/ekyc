@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.hashing import sha256_text
 from app.core.security import hash_secret
 from app.db.base import utcnow
-from app.engines import audit
+from app.engines import audit, ratelimit
 from app.models.enums import AuditEventType, CheckStatus, OtpChannel, Step
 from app.models.otp import OtpChallenge
 from app.models.session import KycSession
@@ -21,6 +21,14 @@ from app.services import kyc
 
 class OtpError(RuntimeError):
     pass
+
+
+class OtpRateLimited(OtpError):
+    """Send limit reached — surfaced as a generic 429 without detail leakage."""
+
+
+class OtpDeliveryError(OtpError):
+    """Gateway delivery failed — surfaced as 503; no challenge is created."""
 
 
 def mask_destination(destination: str) -> str:
@@ -35,12 +43,67 @@ def _generate_code() -> str:
     return str(secrets.randbelow(upper)).zfill(settings.otp_length)
 
 
+def _enforce_send_limits(session: KycSession, destination: str) -> None:
+    """Shared, atomic send limits — Redis-backed, effective across workers.
+
+    Three independent gates: a per-session cooldown, a per-session send cap
+    and a per-destination cap (hashed — the destination itself never appears
+    in the limiter keys). The destination cap is what prevents re-creating
+    sessions to bypass the limits.
+    """
+    if not ratelimit.acquire_once(
+        f"otp:cooldown:{session.id}", settings.otp_send_cooldown_seconds
+    ):
+        raise OtpRateLimited("OTP send cooldown active")
+    if (
+        ratelimit.hit(
+            f"otp:send:sess:{session.id}", settings.otp_send_window_seconds
+        )
+        > settings.otp_max_sends_per_session
+    ):
+        raise OtpRateLimited("OTP send limit reached")
+    if (
+        ratelimit.hit(
+            f"otp:send:dest:{sha256_text(destination)}",
+            settings.otp_send_window_seconds,
+        )
+        > settings.otp_max_sends_per_destination
+    ):
+        raise OtpRateLimited("OTP send limit reached")
+
+
+def _invalidate_pending(db: Session, session_id: str) -> None:
+    """A fresh send supersedes every still-pending code for the session."""
+    pending = db.scalars(
+        select(OtpChallenge).where(
+            OtpChallenge.session_id == session_id,
+            OtpChallenge.verified_at.is_(None),
+            OtpChallenge.expires_at > utcnow(),
+        )
+    )
+    for challenge in pending:
+        challenge.expires_at = utcnow()
+    db.flush()
+
+
 def send_otp(
     db: Session, session: KycSession, channel: OtpChannel | str, destination: str
 ) -> OtpChallenge:
     from app.engines.providers import get_otp_sender
 
+    _enforce_send_limits(session, destination)
+
     code = _generate_code()
+    try:
+        get_otp_sender().send(str(channel), destination, code)
+    except OtpError:
+        raise
+    except Exception as exc:
+        # No challenge is persisted when delivery fails — a down gateway does
+        # not consume attempts nor leave ghost codes behind.
+        raise OtpDeliveryError("OTP delivery unavailable") from exc
+
+    _invalidate_pending(db, session.id)
     challenge = OtpChallenge(
         session_id=session.id,
         tenant_id=session.tenant_id,
@@ -52,8 +115,6 @@ def send_otp(
     )
     db.add(challenge)
     db.flush()
-
-    get_otp_sender().send(str(channel), destination, code)
 
     audit.record_event(
         db,

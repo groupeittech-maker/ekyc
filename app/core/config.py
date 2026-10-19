@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     otp_length: int = 6
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
+    # OTP send limits (shared across workers via the Redis rate limiter).
+    otp_send_cooldown_seconds: int = 60  # min delay between two sends per session
+    otp_send_window_seconds: int = 3600  # window for per-session/per-destination caps
+    otp_max_sends_per_session: int = 5
+    otp_max_sends_per_destination: int = 10  # survives session re-creation
 
     # In-house biometric / OCR module (self-hosted, no third-party SaaS).
     # ONNX models run locally; see scripts/fetch_models.py to provision them.

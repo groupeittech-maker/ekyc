@@ -221,7 +221,16 @@ def send_otp(
     _require_consent(session)
     if not kyc.policy_of(session).requires(Step.OTP):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP is not part of this flow")
-    challenge = otp_engine.send_otp(db, session, payload.channel, payload.destination)
+    try:
+        challenge = otp_engine.send_otp(db, session, payload.channel, payload.destination)
+    except otp_engine.OtpRateLimited as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, "OTP_RATE_LIMITED"
+        ) from exc
+    except otp_engine.OtpDeliveryError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "OTP_DELIVERY_UNAVAILABLE"
+        ) from exc
     db.commit()
     return OtpSendResponse(
         sent=True,
@@ -236,6 +245,7 @@ def verify_otp(
     payload: OtpVerifyRequest, session: VerificationSession, db: DbSession
 ) -> OtpVerifyResponse:
     require_open(session)
+    _require_consent(session)
     try:
         verified = otp_engine.verify_otp(db, session, payload.code)
     except otp_engine.OtpError as exc:
