@@ -24,6 +24,11 @@ class StorageBackend(ABC):
     @abstractmethod
     def exists(self, key: str) -> bool: ...
 
+    @abstractmethod
+    def delete(self, key: str) -> bool:
+        """Delete a blob; returns True when something was removed."""
+        ...
+
 
 class LocalStorage(StorageBackend):
     def __init__(self, root: str) -> None:
@@ -46,6 +51,13 @@ class LocalStorage(StorageBackend):
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
+
+    def delete(self, key: str) -> bool:
+        path = self._path(key)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
 
 
 class S3Storage(StorageBackend):
@@ -77,6 +89,12 @@ class S3Storage(StorageBackend):
         except ClientError:
             return False
         return True
+
+    def delete(self, key: str) -> bool:
+        existed = self.exists(key)
+        if existed:
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+        return existed
 
 
 _backend: StorageBackend | None = None

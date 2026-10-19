@@ -135,6 +135,7 @@ curl localhost:8000/v1/kyc/sessions/KYC-… -H "authorization: Bearer $TOKEN"
 | --- | --- |
 | `POST /v1/admin/tenants` | Créer un tenant (`X-Admin-Key`) |
 | `GET /v1/admin/storage` | Suivi des coffres : artefacts/octets par vault et par tenant, disque local (`X-Admin-Key`) |
+| `POST /v1/admin/purge` | Déclenche la purge de rétention (la tâche Celery `ekyc.purge_expired_sessions` l'exécute chaque nuit via `beat`) |
 | `POST /v1/oauth/token` | Jeton tenant (`client_credentials`) |
 | `POST /v1/kyc/sessions` | Créer une session, obtenir la `verification_url` |
 | `GET /v1/kyc/sessions/{id}` | Résultat minimisé (statut, checks, identité utile) |

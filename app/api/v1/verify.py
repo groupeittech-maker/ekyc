@@ -50,18 +50,26 @@ def verify_document(sha256: str, db: DbSession) -> dict[str, Any]:
         token_artifact = db.get(Artifact, signed.timestamp_token_artifact_id)
         if token_artifact is not None:
             details = signed.timestamp_details or {}
-            timestamp_verification = tsa.verify_token(
-                read_artifact(token_artifact),
-                signed.sha256,
-                issued_at=details.get("issued_at"),
-                provider=details.get("provider"),
-            )
+            if token_artifact.purged_at:
+                timestamp_verification = {"purged": True}
+            else:
+                timestamp_verification = tsa.verify_token(
+                    read_artifact(token_artifact),
+                    signed.sha256,
+                    issued_at=details.get("issued_at"),
+                    provider=details.get("provider"),
+                )
 
     details = signed.timestamp_details or {}
+    signed_artifact = db.get(Artifact, signed.signed_artifact_id)
+    purged_at = signed_artifact.purged_at if signed_artifact else None
     return {
         "found": True,
         "sha256": signed.sha256,
         "issued_at": signed.created_at.isoformat(),
+        # The proof survives the data: anchors stay verifiable after purge.
+        "purged": purged_at is not None,
+        "purged_at": purged_at.isoformat() if purged_at else None,
         "signature": {
             "algorithm": signed.signature_algorithm,
             "certificate_fingerprint": signed.certificate_fingerprint,

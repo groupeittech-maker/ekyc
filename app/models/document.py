@@ -31,6 +31,8 @@ class Artifact(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # Retention: blob deleted by the purge job; the row stays as registry.
+    purged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
 
 
 class Document(Base):

@@ -16,7 +16,7 @@ from app.models.enums import AuditEventType
 from app.models.session import KycSession
 from app.models.tenant import Tenant
 from app.models.webhook import WebhookDelivery
-from app.services import kyc, webhooks
+from app.services import kyc, retention, webhooks
 from app.services.archive import read_artifact
 from app.workers.celery_app import celery_app
 
@@ -61,6 +61,16 @@ def process_selfie(session_id: str, artifact_id: str) -> str:
         biometrics.process_selfie(db, session, read_artifact(artifact))
         _log_gpu_task("process_selfie", session, started)
         return str(kyc.evaluate(db, session))
+
+
+@celery_app.task(name="ekyc.purge_expired_sessions")
+def purge_expired_sessions() -> dict:
+    """Nightly retention sweep — see app.services.retention."""
+    with db_session() as db:
+        report = retention.purge_expired_sessions(db)
+        if report["sessions_purged"]:
+            logger.info("retention purge: %s", report)
+        return report
 
 
 @celery_app.task(

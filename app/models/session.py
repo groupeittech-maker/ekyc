@@ -43,3 +43,5 @@ class KycSession(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    # Retention: personal data purged past retention_days (row kept for audit).
+    purged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)

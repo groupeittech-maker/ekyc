@@ -24,6 +24,13 @@ celery_app.conf.update(
         "ekyc.process_document": {"queue": GPU_QUEUE},
         "ekyc.process_selfie": {"queue": GPU_QUEUE},
         "ekyc.deliver_webhook": {"queue": CPU_QUEUE},
+        "ekyc.purge_expired_sessions": {"queue": CPU_QUEUE},
+    },
+    beat_schedule={
+        "retention-purge-nightly": {
+            "task": "ekyc.purge_expired_sessions",
+            "schedule": 86400.0,  # every 24 h — see `celery beat` service
+        },
     },
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,

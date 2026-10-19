@@ -117,8 +117,24 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
 
+  # Scheduler for periodic tasks (nightly retention purge et al.).
+  beat:
+    build: .
+    command: >-
+      celery -A app.workers.celery_app:celery_app beat -l info
+      --schedule /srv/ekyc/var/beat/celerybeat-schedule
+    environment:
+      EKYC_DATABASE_URL: postgresql+psycopg2://ekyc:ekyc@postgres:5432/ekyc
+      EKYC_REDIS_URL: redis://redis:6379/0
+      EKYC_CELERY_ALWAYS_EAGER: "false"
+    env_file: [.env]
+    volumes: ["beat-schedule:/srv/ekyc/var/beat"]
+    depends_on:
+      redis: {condition: service_started}
+
 volumes:
   pgdata:
   miniodata:
   archive:
   models:
+  beat-schedule:

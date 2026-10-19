@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.db.base import utcnow
 from app.models.document import Artifact
 from app.models.tenant import Tenant
+from app.services.retention import purge_expired_sessions
 from app.services.storage import vault_configs
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -26,6 +27,16 @@ def _local_vault_root(profile: str) -> str | None:
     if cfg and cfg.get("backend", "local") == "local":
         return cfg.get("root")
     return None
+
+
+@router.post("/purge")
+def purge_now(db: DbSession) -> dict[str, Any]:
+    """Manually trigger the retention purge (the Celery beat job runs it
+    nightly). Returns the deletion report; blob failures surface in
+    ``artifacts_failed`` and stay eligible for the next run."""
+    report = purge_expired_sessions(db)
+    db.commit()
+    return report
 
 
 @router.get("/storage")

@@ -144,6 +144,12 @@ def kyc_certificate(session: TenantSession, db: DbSession, tenant: CurrentTenant
     artifact = db.get(Artifact, signed.signed_artifact_id)
     if artifact is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Certificate artifact missing")
+    if artifact.purged_at:
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Retention period elapsed — proof anchors remain verifiable at "
+            f"/v1/verify/{signed.sha256}",
+        )
     return Response(
         content=read_artifact(artifact),
         media_type="application/pdf",
@@ -217,6 +223,12 @@ def download_signed_document(
     artifact = db.get(Artifact, signed.signed_artifact_id)
     if artifact is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Archived document not found")
+    if artifact.purged_at:
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Retention period elapsed — proof anchors remain verifiable at "
+            f"/v1/verify/{signed.sha256}",
+        )
     return Response(
         content=read_artifact(artifact),
         media_type="application/pdf",
