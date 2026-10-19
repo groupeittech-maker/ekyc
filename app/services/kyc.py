@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -169,6 +170,30 @@ def policy_of(session: KycSession) -> FlowPolicy:
     return get_policy(session.flow)
 
 
+def lock_session(db: Session, session_id: str) -> KycSession:
+    """Serialize read-modify-write of a session row across workers.
+
+    Two workers (document + selfie tasks) finish at the same time and each does
+    ``checks = dict(session.checks); checks[step] = ...; session.checks = checks``
+    — the second write loses the first. The UPDATE below acquires the row lock
+    *before* the merge: on PostgreSQL it is a FOR UPDATE row lock, on SQLite the
+    database writer lock. A concurrent transaction then waits for the first to
+    commit, and ``populate_existing`` makes the subsequent SELECT re-read the
+    *committed* state instead of the identity-map copy — the merge sees both
+    checks instead of one clobbering the other.
+    """
+    db.flush()  # push pending writes first — populate_existing would drop them
+    db.execute(
+        update(KycSession).where(KycSession.id == session_id).values(updated_at=utcnow())
+    )
+    return db.scalars(
+        select(KycSession)
+        .where(KycSession.id == session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
+
+
 def set_check(
     db: Session,
     session: KycSession,
@@ -177,6 +202,7 @@ def set_check(
     *,
     internal: dict[str, Any] | None = None,
 ) -> None:
+    session = lock_session(db, session.id)
     checks = dict(session.checks)
     checks[str(step)] = str(status)
     session.checks = checks
@@ -186,7 +212,6 @@ def set_check(
         session.internal = merged
     if session.status == SessionStatus.CREATED:
         session.status = SessionStatus.IN_PROGRESS
-    session.updated_at = utcnow()
     db.flush()
 
 
