@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.core.hashing import canonical_json
@@ -34,10 +34,26 @@ def build_payload(session: KycSession, event_name: str) -> dict[str, Any]:
 
 
 def queue_session_event(db: Session, session: KycSession) -> WebhookDelivery | None:
+    """Queue the webhook matching the *committed* session transition.
+
+    Idempotent at the queue level: the same (session, event) is never queued
+    twice — a retried or re-evaluated transition reuses the existing delivery
+    instead of emitting a duplicate notification.
+    """
     tenant = db.get(Tenant, session.tenant_id)
     event_name = _EVENT_BY_STATUS.get(str(session.status))
     if tenant is None or not tenant.webhook_url or event_name is None:
         return None
+
+    existing = db.scalars(
+        select(WebhookDelivery).where(
+            WebhookDelivery.session_id == session.id,
+            WebhookDelivery.event == event_name,
+            WebhookDelivery.status.in_(("PENDING", "DELIVERED")),
+        )
+    ).first()
+    if existing is not None:
+        return existing
 
     delivery = WebhookDelivery(
         tenant_id=tenant.id,

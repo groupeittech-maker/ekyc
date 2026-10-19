@@ -85,6 +85,8 @@ def deliver_webhook(self, delivery_id: str) -> str:  # noqa: ANN001 - celery bou
         delivery = db.get(WebhookDelivery, delivery_id)
         if delivery is None:
             return "MISSING_DELIVERY"
+        if delivery.status == "DELIVERED":
+            return "DELIVERED"  # idempotent re-execution — never re-notify
         tenant = db.get(Tenant, delivery.tenant_id)
         body = webhooks.serialize(delivery.payload)
         headers = webhooks.signed_headers(

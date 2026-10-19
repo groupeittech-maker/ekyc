@@ -15,7 +15,13 @@ from app.db.base import utcnow
 from app.engines import audit, orchestrator
 from app.engines.decision import decidable_steps, decide
 from app.engines.policy import FlowPolicy, get_policy
-from app.models.enums import AuditEventType, CheckStatus, SessionStatus, Step
+from app.models.enums import (
+    TERMINAL_STATUSES,
+    AuditEventType,
+    CheckStatus,
+    SessionStatus,
+    Step,
+)
 from app.models.session import KycSession
 from app.models.tenant import Tenant
 
@@ -215,10 +221,67 @@ def set_check(
     db.flush()
 
 
+# Status transitions the platform itself may produce. Terminal statuses only
+# self-transition: a finished decision is immutable through evaluate() and can
+# only be corrected by the explicit, audited `override_decision` operation.
+_ALLOWED_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
+    SessionStatus.CREATED: {
+        SessionStatus.CREATED,
+        SessionStatus.IN_PROGRESS,
+        SessionStatus.EXPIRED,
+    },
+    SessionStatus.IN_PROGRESS: {
+        SessionStatus.IN_PROGRESS,
+        SessionStatus.PROCESSING,
+        SessionStatus.VERIFIED,
+        SessionStatus.REJECTED,
+        SessionStatus.REVIEW,
+        SessionStatus.EXPIRED,
+    },
+    SessionStatus.PROCESSING: {
+        SessionStatus.IN_PROGRESS,
+        SessionStatus.VERIFIED,
+        SessionStatus.REJECTED,
+        SessionStatus.REVIEW,
+        SessionStatus.EXPIRED,
+    },
+}
+
+
+def _transition_allowed(current: SessionStatus, target: SessionStatus) -> bool:
+    if current in TERMINAL_STATUSES:
+        return current == target  # idempotent same-status re-evaluation
+    return target in _ALLOWED_TRANSITIONS.get(current, set())
+
+
 def evaluate(db: Session, session: KycSession) -> SessionStatus:
-    """Re-run the decision engine and close the session when it is complete."""
+    """Re-run the decision engine and close the session when it is complete.
+
+    Runs under the session row lock: concurrent evaluations serialize, the
+    second one reads the committed checks and becomes an idempotent no-op.
+    A terminal status is never silently overridden (R3): a late re-evaluation
+    computing a different verdict records a DECISION_BLOCKED audit event and
+    emits no webhook — the stored decision stands.
+    """
+    session = lock_session(db, session.id)
     decision = decide(policy_of(session), session.checks, session.internal or {})
-    previous_status = session.status
+    previous_status = SessionStatus(str(session.status))
+
+    if not _transition_allowed(previous_status, decision.status):
+        audit.record_event(
+            db,
+            tenant_id=session.tenant_id,
+            session_id=session.id,
+            event_type=AuditEventType.DECISION_BLOCKED,
+            payload={
+                "current_status": str(previous_status),
+                "attempted_status": str(decision.status),
+                "reasons": decision.reasons,
+            },
+        )
+        db.flush()
+        return previous_status
+
     session.status = decision.status
     session.reasons = decision.reasons if decision.completed else []
     session.updated_at = utcnow()
@@ -251,6 +314,45 @@ def evaluate(db: Session, session: KycSession) -> SessionStatus:
 
         queue_session_event(db, session)
     return decision.status
+
+
+def override_decision(
+    db: Session,
+    session: KycSession,
+    status: SessionStatus | str,
+    *,
+    reason: str,
+    actor: str = "ADMIN",
+) -> SessionStatus:
+    """Explicit, audited correction of a terminal decision.
+
+    evaluate() cannot do this — only an operator-driven override may move a
+    session out of a final status. The override is recorded as its own event
+    (never disguised as an engine decision) and emits the webhook matching the
+    *new* stored status, so notifications always mirror the committed state.
+    """
+    target = SessionStatus(status)
+    if target not in TERMINAL_STATUSES:
+        raise ValueError(f"Override target must be terminal, got {target}")
+    session = lock_session(db, session.id)
+    previous = session.status
+    session.status = target
+    session.completed_at = session.completed_at or utcnow()
+    session.updated_at = utcnow()
+    audit.record_event(
+        db,
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        event_type=AuditEventType.DECISION_OVERRIDDEN,
+        payload={"previous_status": str(previous), "status": str(target), "reason": reason},
+        actor=actor,
+    )
+    db.flush()
+    if str(previous) != str(target):
+        from app.services.webhooks import queue_session_event
+
+        queue_session_event(db, session)
+    return target
 
 
 def public_result(session: KycSession, *, include_identity: bool = True) -> dict[str, Any]:
