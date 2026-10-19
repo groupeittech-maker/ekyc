@@ -25,11 +25,16 @@ celery_app.conf.update(
         "ekyc.process_selfie": {"queue": GPU_QUEUE},
         "ekyc.deliver_webhook": {"queue": CPU_QUEUE},
         "ekyc.purge_expired_sessions": {"queue": CPU_QUEUE},
+        "ekyc.reconcile_stuck_sessions": {"queue": CPU_QUEUE},
     },
     beat_schedule={
         "retention-purge-nightly": {
             "task": "ekyc.purge_expired_sessions",
             "schedule": 86400.0,  # every 24 h — see `celery beat` service
+        },
+        "reconcile-stuck-sessions": {
+            "task": "ekyc.reconcile_stuck_sessions",
+            "schedule": 300.0,  # every 5 min — seuil: EKYC_STUCK_SESSION_MINUTES
         },
     },
     worker_prefetch_multiplier=1,

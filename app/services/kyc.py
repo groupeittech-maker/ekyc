@@ -189,9 +189,7 @@ def lock_session(db: Session, session_id: str) -> KycSession:
     checks instead of one clobbering the other.
     """
     db.flush()  # push pending writes first — populate_existing would drop them
-    db.execute(
-        update(KycSession).where(KycSession.id == session_id).values(updated_at=utcnow())
-    )
+    db.execute(update(KycSession).where(KycSession.id == session_id).values(updated_at=utcnow()))
     return db.scalars(
         select(KycSession)
         .where(KycSession.id == session_id)
@@ -353,6 +351,26 @@ def override_decision(
 
         queue_session_event(db, session)
     return target
+
+
+def expire(db: Session, session: KycSession) -> None:
+    """Close a session whose TTL elapsed — used by the reconciliation sweep."""
+    session = lock_session(db, session.id)
+    if session.status in TERMINAL_STATUSES or session.expires_at > utcnow():
+        return
+    session.status = SessionStatus.EXPIRED
+    session.updated_at = utcnow()
+    audit.record_event(
+        db,
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        event_type=AuditEventType.SESSION_EXPIRED,
+        payload={"expired_at": session.expires_at.isoformat()},
+    )
+    db.flush()
+    from app.services.webhooks import queue_session_event
+
+    queue_session_event(db, session)
 
 
 def public_result(session: KycSession, *, include_identity: bool = True) -> dict[str, Any]:

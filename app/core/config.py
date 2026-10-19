@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./ekyc.db"
     redis_url: str = "redis://localhost:6379/0"
     celery_always_eager: bool = True
+    # Reconciliation sweep: a non-terminal session untouched for this long is
+    # considered stuck (lost task) and its pending work is requeued.
+    stuck_session_minutes: int = 15
 
     admin_api_key: str = "change-me-admin-key"
     jwt_secret: str = "change-me-jwt-secret"
