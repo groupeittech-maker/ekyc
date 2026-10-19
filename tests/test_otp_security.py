@@ -99,9 +99,7 @@ def test_send_and_verify_require_consent(client: TestClient) -> None:
 
     resp = _send(client, sid, vh)
     assert resp.status_code == 409 and resp.json()["detail"] == "CONSENT_REQUIRED"
-    resp = client.post(
-        f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"}
-    )
+    resp = client.post(f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"})
     assert resp.status_code == 409 and resp.json()["detail"] == "CONSENT_REQUIRED"
 
 
@@ -164,22 +162,16 @@ def test_concurrent_sends_cannot_bypass_limit(
 # --------------------------------------------------------------------------- #
 # Code lifecycle
 # --------------------------------------------------------------------------- #
-def test_new_send_invalidates_previous_code(
-    client: TestClient, send_ctx: dict
-) -> None:
+def test_new_send_invalidates_previous_code(client: TestClient, send_ctx: dict) -> None:
     sid, vh = send_ctx["make_session"]()
     _send(client, sid, vh)
     first = send_ctx["sender"].codes[-1]
     _send(client, sid, vh)
     second = send_ctx["sender"].codes[-1]
 
-    resp = client.post(
-        f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": first}
-    )
+    resp = client.post(f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": first})
     assert resp.json()["verified"] is False  # superseded code no longer verifies
-    resp = client.post(
-        f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": second}
-    )
+    resp = client.post(f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": second})
     assert resp.json()["verified"] is True
 
 
@@ -209,12 +201,8 @@ def test_max_attempts_marks_check_failed(
     sid, vh = send_ctx["make_session"]()
     _send(client, sid, vh)
     for _ in range(2):
-        client.post(
-            f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"}
-        )
-    resp = client.post(
-        f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"}
-    )
+        client.post(f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"})
+    resp = client.post(f"/v1/verification/{sid}/otp/verify", headers=vh, json={"code": "000000"})
     assert resp.status_code == 400
     with SessionLocal() as db:
         from app.models.session import KycSession
@@ -237,9 +225,7 @@ def test_gateway_down_returns_503_without_challenge(
     resp = _send(client, sid, vh)
     assert resp.status_code == 503
     with SessionLocal() as db:
-        assert db.scalars(
-            select(OtpChallenge).where(OtpChallenge.session_id == sid)
-        ).all() == []
+        assert db.scalars(select(OtpChallenge).where(OtpChallenge.session_id == sid)).all() == []
 
 
 def test_otp_code_never_logged(

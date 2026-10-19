@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "description": "Approved ONNX model manifest — sha256 measured on the provisioned production volume. A model not listed here is refused; update via a reviewed commit, never from the download source itself.",
+  "models": {
+    "face_detection_yunet_2023mar.onnx": {
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "source": "opencv_zoo (face_detection_yunet/2023mar)",
+      "version": "2023-03"
+    },
+    "face_recognition_sface_2021dec.onnx": {
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      "source": "opencv_zoo (face_recognition_sface/2021dec)",
+      "version": "2021-12"
+    },
+    "antispoof_quantized.onnx": {
+      "sha256": "fde20585635cae62ed1d41796f76b6f8bc4b92cd91ec1cf0f1bc6485d2d587a9",
+      "source": "facenox/face-antispoof-onnx best_model_quantized",
+      "version": "1.0"
+    }
+  }
+}

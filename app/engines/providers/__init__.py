@@ -41,8 +41,7 @@ _DEV_ONLY = {"stub", "log"}
 def _resolve(name: str, registry: dict[str, Callable], kind: str):
     if name not in registry:
         raise UnknownProviderError(
-            f"Unknown {kind} provider: {name!r} "
-            f"(configured: {', '.join(sorted(registry))})"
+            f"Unknown {kind} provider: {name!r} " f"(configured: {', '.join(sorted(registry))})"
         )
     if settings.environment == "production" and name in _DEV_ONLY:
         raise UnknownProviderError(
@@ -67,16 +66,15 @@ def _inhouse_face() -> FaceProvider:
 
 def _tesseract() -> OcrProvider:
     try:
-        from PIL import Image  # noqa: F401
         import pytesseract  # noqa: F401
+        from PIL import Image  # noqa: F401
     except ImportError as exc:
         raise ProviderDependencyError(
             "tesseract OCR requires the 'ocr' extra (pip install pytesseract Pillow)"
         ) from exc
     if not shutil.which("tesseract"):
         raise ProviderDependencyError(
-            "tesseract OCR requires the tesseract binary on PATH "
-            "(apt-get install tesseract-ocr)"
+            "tesseract OCR requires the tesseract binary on PATH " "(apt-get install tesseract-ocr)"
         )
     from app.engines.providers.tesseract import TesseractOcrProvider
 
@@ -85,9 +83,7 @@ def _tesseract() -> OcrProvider:
 
 def _http_otp() -> OtpSender:
     if not settings.otp_http_url:
-        raise ProviderDependencyError(
-            "http OTP sender requires EKYC_OTP_HTTP_URL to be configured"
-        )
+        raise ProviderDependencyError("http OTP sender requires EKYC_OTP_HTTP_URL to be configured")
     from app.engines.providers.otp_senders import HttpOtpSender
 
     return HttpOtpSender()
@@ -105,8 +101,7 @@ def _require_cv() -> None:
         import numpy  # noqa: F401
     except ImportError as exc:
         raise ProviderDependencyError(
-            "inhouse providers require the 'biometrics' extra "
-            "(opencv-python-headless numpy)"
+            "inhouse providers require the 'biometrics' extra " "(opencv-python-headless numpy)"
         ) from exc
 
 

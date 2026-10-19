@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # In-house biometric / OCR module (self-hosted, no third-party SaaS).
     # ONNX models run locally; see scripts/fetch_models.py to provision them.
     biometrics_model_dir: str = "./var/models"
+    # Path to the approved model manifest (JSON: name -> sha256/source/version).
+    # Empty = the packaged manifest shipped with the app (models_manifest.json).
+    manifest_path: str = ""
     # Relative paths within the OpenCV Zoo model tree (git-lfs backed).
     face_detector_model: str = "face_detection_yunet/face_detection_yunet_2023mar.onnx"
     face_recognizer_model: str = "face_recognition_sface/face_recognition_sface_2021dec.onnx"
@@ -175,16 +178,14 @@ def validate_production_settings(cfg: Settings | None = None) -> None:
     for field in ("ocr_provider", "face_provider", "otp_provider"):
         if getattr(cfg, field) in _DEV_ONLY_PROVIDERS:
             violations.append(
-                f"EKYC_{field.upper()}: '{getattr(cfg, field)}' provider "
-                "is development-only"
+                f"EKYC_{field.upper()}: '{getattr(cfg, field)}' provider " "is development-only"
             )
     if cfg.storage_encryption and not cfg.kek:
         violations.append("EKYC_KEK: required when storage encryption is enabled")
 
     if violations:
         raise InsecureConfigError(
-            "Refusing to start in production — fix configuration:\n  - "
-            + "\n  - ".join(violations)
+            "Refusing to start in production — fix configuration:\n  - " + "\n  - ".join(violations)
         )
 
 

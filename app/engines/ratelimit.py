@@ -47,8 +47,9 @@ def _redis_down() -> bool:
 def _mark_redis_down() -> None:
     global _backend_down_until
     _backend_down_until = time.time() + _BACKEND_DOWN_GRACE_S
-    logger.warning("rate limiter: Redis unavailable — per-process fallback for %ss",
-                   _BACKEND_DOWN_GRACE_S)
+    logger.warning(
+        "rate limiter: Redis unavailable — per-process fallback for %ss", _BACKEND_DOWN_GRACE_S
+    )
 
 
 def _mem_hit(key: str, window_s: int) -> int:

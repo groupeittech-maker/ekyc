@@ -6,10 +6,8 @@ Usage:
 
 from __future__ import annotations
 
-import httpx
-
 from app.core.config import settings
-from app.engines.providers.models import model_dir
+from app.engines.providers.models import fetch_model, model_dir
 
 SOURCE_URL = (
     "https://raw.githubusercontent.com/facenox/face-antispoof-onnx/main/"
@@ -24,13 +22,7 @@ def main() -> None:
         return
 
     print(f"  + downloading {destination.name} ...")
-    with httpx.stream("GET", SOURCE_URL, follow_redirects=True, timeout=120.0) as response:
-        response.raise_for_status()
-        tmp = destination.with_suffix(destination.suffix + ".part")
-        with tmp.open("wb") as handle:
-            for chunk in response.iter_bytes():
-                handle.write(chunk)
-        tmp.replace(destination)
+    fetch_model(settings.antispoof_model, url=SOURCE_URL)  # verified + atomic
     print(f"    saved to {destination}")
 
 

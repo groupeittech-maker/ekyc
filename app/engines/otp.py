@@ -51,14 +51,10 @@ def _enforce_send_limits(session: KycSession, destination: str) -> None:
     in the limiter keys). The destination cap is what prevents re-creating
     sessions to bypass the limits.
     """
-    if not ratelimit.acquire_once(
-        f"otp:cooldown:{session.id}", settings.otp_send_cooldown_seconds
-    ):
+    if not ratelimit.acquire_once(f"otp:cooldown:{session.id}", settings.otp_send_cooldown_seconds):
         raise OtpRateLimited("OTP send cooldown active")
     if (
-        ratelimit.hit(
-            f"otp:send:sess:{session.id}", settings.otp_send_window_seconds
-        )
+        ratelimit.hit(f"otp:send:sess:{session.id}", settings.otp_send_window_seconds)
         > settings.otp_max_sends_per_session
     ):
         raise OtpRateLimited("OTP send limit reached")

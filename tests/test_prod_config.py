@@ -87,13 +87,8 @@ def test_secret_value_never_in_error_message() -> None:
 
 def test_admin_endpoint_constant_time_and_functional(client: TestClient) -> None:
     # Wrong key → 401; right key → works (compare_digest path exercised).
+    assert client.get("/v1/admin/storage", headers={"X-Admin-Key": "wrong"}).status_code == 401
     assert (
-        client.get("/v1/admin/storage", headers={"X-Admin-Key": "wrong"}).status_code
-        == 401
-    )
-    assert (
-        client.get(
-            "/v1/admin/storage", headers={"X-Admin-Key": "test-admin-key"}
-        ).status_code
+        client.get("/v1/admin/storage", headers={"X-Admin-Key": "test-admin-key"}).status_code
         == 200
     )

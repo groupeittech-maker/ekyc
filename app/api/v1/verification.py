@@ -224,9 +224,7 @@ def send_otp(
     try:
         challenge = otp_engine.send_otp(db, session, payload.channel, payload.destination)
     except otp_engine.OtpRateLimited as exc:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS, "OTP_RATE_LIMITED"
-        ) from exc
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "OTP_RATE_LIMITED") from exc
     except otp_engine.OtpDeliveryError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "OTP_DELIVERY_UNAVAILABLE"
