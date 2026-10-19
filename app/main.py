@@ -20,7 +20,9 @@ templates = Jinja2Templates(directory="app/web/templates")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     import app.models  # noqa: F401 - register the mappers before create_all
+    from app.core.config import validate_production_settings
 
+    validate_production_settings()  # fail fast on dev-grade secrets in prod
     if settings.environment != "production":
         # Production schema changes go through Alembic migrations.
         Base.metadata.create_all(bind=engine)

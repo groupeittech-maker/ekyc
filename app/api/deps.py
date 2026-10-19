@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 import jwt
@@ -41,7 +42,10 @@ CurrentTenant = Annotated[Tenant, Depends(get_current_tenant)]
 
 
 def require_admin(x_admin_key: Annotated[str | None, Header()] = None) -> None:
-    if x_admin_key != settings.admin_api_key:
+    # Constant-time comparison — response timing must not leak the key.
+    if x_admin_key is None or not hmac.compare_digest(
+        x_admin_key, settings.admin_api_key
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid admin key")
 
 

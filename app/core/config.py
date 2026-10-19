@@ -120,4 +120,72 @@ def get_settings() -> Settings:
     return Settings()
 
 
+class InsecureConfigError(RuntimeError):
+    """Raised at boot when production runs with development-grade secrets."""
+
+
+# Known development values — a length check alone is not proof of quality:
+# these exact strings are refused outright wherever they appear.
+_FORBIDDEN_SECRET_VALUES = {
+    "",
+    "change-me-admin-key",
+    "change-me-jwt-secret",
+    "test-admin-key",
+    "test-jwt-secret",
+    "secret",
+    "changeme",
+    "admin",
+    "password",
+}
+
+_DEV_ONLY_PROVIDERS = {"stub", "log"}
+
+
+def _weak_secret(value: str | None) -> str | None:
+    """Returns a violation label or None — never the secret itself."""
+    if value is None or value.strip() == "":
+        return "missing or empty"
+    if value.strip() in _FORBIDDEN_SECRET_VALUES:
+        return "a known development/default value"
+    if len(value) < 32:
+        return "shorter than 32 characters"
+    return None
+
+
+def validate_production_settings(cfg: Settings | None = None) -> None:
+    """Fail-fast boot validation — production must not run on dev secrets.
+
+    Violations are reported by *label* only: secret values never appear in
+    the exception, in logs or in responses.
+    """
+    cfg = cfg or settings
+    if cfg.environment != "production":
+        return
+
+    violations: list[str] = []
+    for field in ("admin_api_key", "jwt_secret"):
+        reason = _weak_secret(getattr(cfg, field))
+        if reason:
+            violations.append(f"EKYC_{field.upper()}: {reason}")
+    if cfg.signing_dev_self_signed_cert:
+        violations.append(
+            "EKYC_SIGNING_DEV_SELF_SIGNED_CERT: development certificate "
+            "cannot be used in production"
+        )
+    for field in ("ocr_provider", "face_provider", "otp_provider"):
+        if getattr(cfg, field) in _DEV_ONLY_PROVIDERS:
+            violations.append(
+                f"EKYC_{field.upper()}: '{getattr(cfg, field)}' provider "
+                "is development-only"
+            )
+    if cfg.storage_encryption and not cfg.kek:
+        violations.append("EKYC_KEK: required when storage encryption is enabled")
+
+    if violations:
+        raise InsecureConfigError(
+            "Refusing to start in production — fix configuration:\n  - "
+            + "\n  - ".join(violations)
+        )
+
+
 settings = get_settings()
