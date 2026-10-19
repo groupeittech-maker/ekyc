@@ -201,3 +201,44 @@ def test_session_without_jurisdiction_stays_on_default_vault(client: TestClient)
     assert resp.status_code == 201
     body = resp.json()
     assert body["jurisdiction"] == "GLOBAL"
+
+
+# --------------------------------------------------------------------------- #
+# Admin storage monitoring: GET /v1/admin/storage
+# --------------------------------------------------------------------------- #
+def test_admin_storage_reports_per_vault_and_tenant(vault_ci: str, client: TestClient) -> None:
+    creds = _tenant(client)
+    headers = _headers(client, creds)
+    session = client.post(
+        "/v1/kyc/sessions",
+        headers=headers,
+        json={"customer_reference": "ORC-7", "flow": "TRAVEL_INSURANCE", "jurisdiction": "CI"},
+    ).json()
+    pdf = render_contract(
+        title="M",
+        session_id=session["session_id"],
+        tenant_name="T",
+        body=[("a", "1")],
+        issued_at="2026-10-18T00:00:00",
+    )
+    client.post(
+        f"/v1/kyc/sessions/{session['session_id']}/documents",
+        headers=headers,
+        json={
+            "document_reference": "MON-1",
+            "pdf_base64": base64.b64encode(pdf).decode(),
+        },
+    )
+
+    report = client.get("/v1/admin/storage", headers=_ADMIN).json()
+    assert report["totals"]["artifacts"] >= 3  # source + token + sealed
+    assert report["vaults"]["ci-vault"]["artifacts"] >= 3
+    # Configured vaults appear even before use; local ones carry disk stats.
+    assert "default" in report["vaults"]
+    assert report["vaults"]["ci-vault"]["disk"]["root"] == vault_ci
+    entry = next(t for t in report["tenants"] if t["tenant_id"] == creds["tenant_id"])
+    assert entry["by_vault"]["ci-vault"]["artifacts"] >= 3
+
+
+def test_admin_storage_requires_admin_key(client: TestClient) -> None:
+    assert client.get("/v1/admin/storage").status_code == 401
