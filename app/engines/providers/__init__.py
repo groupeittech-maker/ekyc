@@ -89,6 +89,15 @@ def _http_otp() -> OtpSender:
     return HttpOtpSender()
 
 
+def _oauth_sms_otp() -> OtpSender:
+    from app.engines.providers.otp_senders import OAuthSmsOtpSender
+
+    try:
+        return OAuthSmsOtpSender()
+    except RuntimeError as exc:
+        raise ProviderDependencyError(str(exc)) from exc
+
+
 def _log_otp() -> OtpSender:
     from app.engines.providers.otp_senders import LogOtpSender
 
@@ -117,6 +126,7 @@ _FACE_REGISTRY: dict[str, Callable[[], FaceProvider]] = {
 _OTP_REGISTRY: dict[str, Callable[[], OtpSender]] = {
     "log": _log_otp,
     "http": _http_otp,
+    "oauth-sms": _oauth_sms_otp,
 }
 
 

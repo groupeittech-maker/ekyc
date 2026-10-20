@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     otp_provider: str = "log"  # log | http
     otp_http_url: str = ""
     otp_http_auth_header: str = ""  # optional Authorization value for the OTP gateway
+    # oauth-sms sender (e.g. 1smsafrica): client_credentials token + JSON body
+    otp_oauth_token_url: str = ""
+    otp_oauth_client_id: str = ""
+    otp_oauth_client_secret: str = ""
+    otp_sms_sender_id: str = "TRUSDY"
+    otp_message_template: str = "Votre code de verification est {code}."
+    # JSON template of the send body; placeholders: {destination} {message}
+    # {code} {sender} {channel}. Empty = {"to","message","sender_id"} default.
+    otp_http_body_template: str = ""
     otp_length: int = 6
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
