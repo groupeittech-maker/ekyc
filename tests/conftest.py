@@ -70,6 +70,16 @@ def db() -> Iterator:
         session.close()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> Iterator[None]:
+    """Rate-limit counters are process-wide (shared DB + shared tests' phone
+    numbers) — reset them per test so OTP limits don't bleed across cases."""
+    from app.engines import ratelimit
+
+    ratelimit._reset_mem()
+    yield
+
+
 class CapturingOtpSender(OtpSender):
     name = "capture"
 
