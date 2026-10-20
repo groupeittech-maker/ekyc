@@ -180,3 +180,42 @@ def test_oauth_sms_missing_credentials_fails(
     monkeypatch.setattr(settings, "otp_http_url", "https://gw.test/send")
     with pytest.raises(ProviderDependencyError, match="OTP_OAUTH_CLIENT_ID"):
         providers.get_otp_sender()
+
+
+# --------------------------------------------------------------------------- #
+# Gateways returning HTTP 200 with an error body (e.g. 1smsafrica)
+# --------------------------------------------------------------------------- #
+def test_http_sender_detects_body_level_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ErrResp:
+        def raise_for_status(self) -> None:
+            pass  # HTTP 200 — the error lives in the JSON body
+
+        def json(self):
+            return {"status": "error", "message": "insufficient balance"}
+
+    monkeypatch.setattr(settings, "otp_provider", "http")
+    monkeypatch.setattr(settings, "otp_http_url", "https://gw.test/send")
+    monkeypatch.setattr(
+        "app.engines.providers.otp_senders.httpx.post",
+        lambda *a, **k: _ErrResp(),
+    )
+    with pytest.raises(RuntimeError, match="rejected"):
+        providers.get_otp_sender().send("SMS", "+22507123456", "123456")
+
+
+def test_destination_digits_strips_plus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list = []
+    monkeypatch.setattr(settings, "otp_provider", "http")
+    monkeypatch.setattr(settings, "otp_http_url", "https://gw.test/send")
+    monkeypatch.setattr(
+        settings,
+        "otp_http_body_template",
+        '{"recipient": "{destination_digits}", "message": "{message}"}',
+    )
+    _fake_httpx(calls, monkeypatch)
+    providers.get_otp_sender().send("SMS", "+22507123456", "482913")
+    assert calls[0]["json"]["recipient"] == "22507123456"

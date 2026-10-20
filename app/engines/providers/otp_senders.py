@@ -25,21 +25,41 @@ class _KeepMissing(dict):
 def _render_body(channel: str, destination: str, code: str) -> dict:
     """Render the send payload from EKYC_OTP_HTTP_BODY_TEMPLATE.
 
-    Placeholders: ``{destination}`` ``{message}`` ``{code}`` ``{sender}``
-    ``{channel}`` — so each SMS gateway's field names stay configuration,
-    not code. Empty template = the original ``{channel,destination,code}``
+    Placeholders: ``{destination}`` ``{destination_digits}`` ``{message}``
+    ``{code}`` ``{sender}`` ``{channel}`` — so each SMS gateway's field names
+    stay configuration, not code. ``{destination_digits}`` strips the leading
+    "+" for gateways expecting international format without it (e.g.
+    1smsafrica). Empty template = the original ``{channel,destination,code}``
     body (backward compatible).
     """
     template = json.loads(settings.otp_http_body_template or "null") or _DEFAULT_BODY
     message = settings.otp_message_template.format(code=code)
     mapping = {
         "destination": destination,
+        "destination_digits": destination.lstrip("+"),
         "message": message,
         "code": code,
         "sender": settings.otp_sms_sender_id,
         "channel": channel,
     }
     return {key: str(value).format_map(_KeepMissing(mapping)) for key, value in template.items()}
+
+
+def _raise_on_gateway_error(response: httpx.Response) -> None:
+    """Some gateways (e.g. 1smsafrica) return HTTP 200 with an error body —
+    ``raise_for_status`` alone cannot see it. When EKYC_OTP_HTTP_ERROR_FIELD /
+    _VALUE are configured and the JSON body matches, treat it as a failure.
+    Never logs the response body (it may echo the destination number)."""
+    field = settings.otp_http_error_field
+    sentinel = settings.otp_http_error_value
+    if not field:
+        return
+    try:
+        payload = response.json()
+    except ValueError:
+        return  # non-JSON body — nothing to inspect
+    if isinstance(payload, dict) and payload.get(field) == sentinel:
+        raise RuntimeError(f"SMS gateway rejected the send ({field}={sentinel})")
 
 
 class LogOtpSender(OtpSender):
@@ -73,6 +93,7 @@ class HttpOtpSender(OtpSender):
             timeout=10.0,
         )
         response.raise_for_status()
+        _raise_on_gateway_error(response)
 
 
 class OAuthSmsOtpSender(OtpSender):
@@ -130,3 +151,4 @@ class OAuthSmsOtpSender(OtpSender):
             timeout=10.0,
         )
         response.raise_for_status()
+        _raise_on_gateway_error(response)

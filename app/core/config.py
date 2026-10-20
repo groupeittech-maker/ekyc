@@ -65,9 +65,14 @@ class Settings(BaseSettings):
     otp_oauth_client_secret: str = ""
     otp_sms_sender_id: str = "TRUSDY"
     otp_message_template: str = "Votre code de verification est {code}."
-    # JSON template of the send body; placeholders: {destination} {message}
-    # {code} {sender} {channel}. Empty = {"to","message","sender_id"} default.
+    # JSON template of the send body; placeholders: {destination}
+    # {destination_digits} {message} {code} {sender} {channel}.
+    # Empty = {"channel","destination","code"} default.
     otp_http_body_template: str = ""
+    # Gateways returning HTTP 200 on failure: JSON field/value meaning "error"
+    # (e.g. 1smsafrica: {"status": "error"}). Empty field disables the check.
+    otp_http_error_field: str = "status"
+    otp_http_error_value: str = "error"
     otp_length: int = 6
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
