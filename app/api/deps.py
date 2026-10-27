@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import decode_access_token, verify_secret
+from app.db.base import utcnow
 from app.db.session import get_db
 from app.models.session import KycSession
 from app.models.tenant import Tenant
@@ -54,6 +55,18 @@ def get_tenant_session(session_id: Annotated[str, Path()], db: DbSession, tenant
     return session
 
 
+def _valid_session_token(session: KycSession, token: str) -> bool:
+    if verify_secret(token, session.access_token_hash):
+        return True
+    # Device bearer minted by the one-time transfer-code exchange (QR handoff).
+    if session.transfer_code_hash and session.transfer_expires_at:
+        if session.transfer_expires_at > utcnow() and verify_secret(
+            token, session.transfer_code_hash
+        ):
+            return True
+    return False
+
+
 def get_verification_session(
     session_id: Annotated[str, Path()],
     db: DbSession,
@@ -65,7 +78,7 @@ def get_verification_session(
     session = db.get(KycSession, session_id)
     if session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
-    if not verify_secret(token, session.access_token_hash):
+    if not _valid_session_token(session, token):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid session token")
     request.state.session_id = session.id
     return session

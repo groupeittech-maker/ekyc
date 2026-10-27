@@ -13,6 +13,7 @@ from app.core.ids import new_session_id
 from app.core.security import new_session_access_token, verify_secret
 from app.db.base import utcnow
 from app.engines import audit, orchestrator
+from app.engines import decision as decision_module
 from app.engines.decision import decidable_steps, decide
 from app.engines.policy import FlowPolicy, get_policy
 from app.models.enums import (
@@ -24,6 +25,22 @@ from app.models.enums import (
 )
 from app.models.session import KycSession
 from app.models.tenant import Tenant
+
+
+def _models_manifest_version() -> str:
+    """Version of the approved biometric model manifest, for the audit trail."""
+    import json
+    from pathlib import Path
+
+    path = (
+        Path(settings.manifest_path).expanduser()
+        if settings.manifest_path
+        else Path(__file__).resolve().parents[1] / "engines" / "providers" / "models_manifest.json"
+    )
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8")).get("version", "unknown"))
+    except Exception:
+        return "unknown"
 
 
 class SessionExpiredError(RuntimeError):
@@ -262,7 +279,35 @@ def evaluate(db: Session, session: KycSession) -> SessionStatus:
     emits no webhook — the stored decision stands.
     """
     session = lock_session(db, session.id)
-    decision = decide(policy_of(session), session.checks, session.internal or {})
+    policy = policy_of(session)
+
+    # Fraud signals run once every required check has a value — before the
+    # decision so decide() can weigh them. Skipped on terminal sessions:
+    # re-evaluation is an idempotent no-op, so no extra audit noise.
+    open_checks = [
+        step
+        for step in decidable_steps(policy)
+        if session.checks.get(str(step), CheckStatus.PENDING)
+        in (CheckStatus.PENDING, CheckStatus.RETRY)
+    ]
+    if not open_checks and session.status not in TERMINAL_STATUSES:
+        from app.engines import fraud
+
+        result = fraud.scan(db, session)
+        merged_internal = dict(session.internal)
+        if merged_internal.get("fraud") != result:
+            merged_internal["fraud"] = result
+            session.internal = merged_internal
+            if result["signals"]:
+                audit.record_event(
+                    db,
+                    tenant_id=session.tenant_id,
+                    session_id=session.id,
+                    event_type=AuditEventType.FRAUD_SIGNAL,
+                    payload={"level": result["level"], "signals": result["signals"]},
+                )
+
+    decision = decide(policy, session.checks, session.internal or {})
     previous_status = SessionStatus(str(session.status))
 
     if not _transition_allowed(previous_status, decision.status):
@@ -303,6 +348,22 @@ def evaluate(db: Session, session: KycSession) -> SessionStatus:
                 "reasons": decision.reasons,
                 "score": decision.score,
                 "risk_level": decision.risk_level,
+                # Reproducibility: which ruleset, providers and models decided.
+                "rules_version": decision_module.RULES_VERSION,
+                "policy_version": policy.policy_version,
+                "providers": {
+                    "ocr": settings.ocr_provider,
+                    "face": settings.face_provider,
+                    "otp": settings.otp_provider,
+                },
+                "models_version": _models_manifest_version(),
+                "thresholds": {
+                    "face_match": settings.face_match_threshold,
+                    "liveness": settings.liveness_threshold,
+                    "document_review": settings.document_review_threshold,
+                    "risk_accept": settings.risk_accept_threshold,
+                    "risk_review": settings.risk_review_threshold,
+                },
             },
         )
     db.flush()

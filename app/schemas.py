@@ -42,6 +42,10 @@ class SessionCreateRequest(BaseModel):
     flow: str
     customer_reference: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Tenant-asserted OTP destination (the phone number on file). When set,
+    # the end-user cannot substitute another number — OTP then proves control
+    # of the declared number, not of an arbitrary one.
+    otp_destination: str | None = None
     # Regulatory context of the operation (e.g. "CI", "EU", "GLOBAL"), asserted
     # by the tenant — NOT the document's country. Falls back to the tenant's
     # default jurisdiction, then the platform default.
@@ -81,6 +85,10 @@ class SessionContextResponse(BaseModel):
     checks: dict[str, str]
     branding: dict[str, Any]
     consent: dict[str, Any] = Field(default_factory=dict)
+    # Masked tenant-declared OTP destination, when the session binds one.
+    otp_destination: str | None = None
+    # Server-side consent policy version the UI must submit.
+    consent_policy_version: str = "v1"
     expires_at: datetime
 
 
@@ -122,6 +130,37 @@ class ConsentResponse(StepResultResponse):
 class DocumentUploadResponse(StepResultResponse):
     document_id: str
     document_type: DocumentType
+
+
+class TransferCreateResponse(BaseModel):
+    transfer_url: str
+    expires_in: int
+    # PNG QR of the transfer URL as a data URI — rendered server-side so the
+    # code never leaves through a third-party chart API or a URL query.
+    qr_data_uri: str | None = None
+
+
+class TransferExchangeRequest(BaseModel):
+    code: str
+
+
+class TransferExchangeResponse(BaseModel):
+    session_id: str
+    token: str
+
+
+class NfcSubmissionRequest(BaseModel):
+    """eMRTD data groups read over NFC by the mobile app (base64)."""
+
+    ef_com: str
+    ef_sod: str
+    dg1: str | None = None
+    dg2: str | None = None
+
+
+class NfcResultResponse(StepResultResponse):
+    nfc_status: str  # VALID | INVALID | INDETERMINATE
+    reason: str
 
 
 class ContractRequest(BaseModel):

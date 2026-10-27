@@ -46,7 +46,10 @@ def create_session(
             tenant=tenant,
             flow=payload.flow,
             customer_reference=payload.customer_reference,
-            metadata=payload.metadata,
+            metadata={
+                **payload.metadata,
+                **({"otp_destination": payload.otp_destination} if payload.otp_destination else {}),
+            },
             jurisdiction=payload.jurisdiction,
             ip=client_ip(request),
         )

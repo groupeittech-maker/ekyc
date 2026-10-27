@@ -24,6 +24,8 @@ from app.models.enums import (
 from app.models.session import KycSession
 from app.models.tenant import Tenant
 from app.models.webhook import WebhookDelivery
+from app.engines.providers import ProviderDependencyError
+from app.engines.providers.models import ModelNotAvailable
 from app.services import kyc, retention, webhooks
 from app.services.archive import read_artifact
 from app.services.storage import UnknownVaultError
@@ -41,12 +43,19 @@ _PERMANENT_FAILURES = (
     TypeError,
     VaultError,
     UnknownVaultError,
+    ModelNotAvailable,
+    ProviderDependencyError,
 )
 _TASK_MAX_RETRIES = 3
 
 
 def _check_pending(session: KycSession, step: Step) -> bool:
-    return str(session.checks.get(str(step), CheckStatus.PENDING)) == str(CheckStatus.PENDING)
+    """Open check = still work to do: not yet run (PENDING) or awaiting a new
+    capture (RETRY)."""
+    return str(session.checks.get(str(step), CheckStatus.PENDING)) in (
+        str(CheckStatus.PENDING),
+        str(CheckStatus.RETRY),
+    )
 
 
 def _processing_failed(
@@ -118,8 +127,13 @@ def process_document(self, document_id: str) -> str:  # noqa: ANN001
         # the check has been decided (PASSED/FAILED/REVIEW).
         if not _check_pending(session, Step.DOCUMENT_VERIFICATION):
             return "ALREADY_APPLIED"
+        images = [read_artifact(artifact)]
+        if document.verso_artifact_id:
+            verso = db.get(Artifact, document.verso_artifact_id)
+            if verso is not None:
+                images.append(read_artifact(verso))
         started = time.perf_counter()
-        identity.process_document(db, session, document, read_artifact(artifact))
+        identity.process_document(db, session, document, images)
         _log_gpu_task("process_document", session, started)
         return str(kyc.evaluate(db, session))
 

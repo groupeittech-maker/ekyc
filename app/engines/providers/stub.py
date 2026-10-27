@@ -21,7 +21,7 @@ from app.engines.providers.base import (
     OcrProvider,
     OcrResult,
 )
-from app.engines.providers.mrz import find_mrz, parse_td3
+from app.engines.providers.mrz import find_mrz, parse_mrz
 
 
 def _score_from(data: bytes, salt: str, low: float, high: float) -> float:
@@ -41,7 +41,7 @@ class StubOcrProvider(OcrProvider):
         text = _as_text(image)
         mrz = find_mrz(text)
         if mrz:
-            fields = parse_td3(*mrz)
+            fields = parse_mrz(mrz)
             fields["document_type"] = document_type
             return OcrResult(
                 fields=fields,

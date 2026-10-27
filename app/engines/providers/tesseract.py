@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 
 from app.engines.providers.base import DocumentAuthenticityResult, OcrProvider, OcrResult
-from app.engines.providers.mrz import find_mrz, parse_td3
+from app.engines.providers.mrz import find_mrz, parse_mrz
 
 
 class TesseractOcrProvider(OcrProvider):
@@ -19,7 +19,7 @@ class TesseractOcrProvider(OcrProvider):
         mrz = find_mrz(text)
         if not mrz:
             return OcrResult(fields={}, raw_text=text, confidence=0.0, provider=self.name)
-        fields = parse_td3(*mrz)
+        fields = parse_mrz(mrz)
         fields["document_type"] = document_type
         return OcrResult(
             fields=fields,

@@ -114,9 +114,13 @@ def test_ocr_parses_mrz_and_audit_chain_is_verifiable(
     assert audit["events"][1]["previous_event_hash"] == audit["events"][0]["event_hash"]
 
 
-def test_failed_liveness_rejects_the_session(
+def test_failed_liveness_rejects_after_retry_budget(
     client: TestClient, tenant_token: str, otp_sender: CapturingOtpSender
 ) -> None:
+    """A bad capture asks for a new photo (RETRY); only once the retry budget
+    is spent does a genuine spoof signal become a hard rejection."""
+    from app.core.config import settings
+
     session = create_session(client, tenant_token)
     headers = session_headers(session["verification_url"])
     base = f"/v1/verification/{session['session_id']}"
@@ -128,12 +132,20 @@ def test_failed_liveness_rejects_the_session(
         files={"file": ("passport.txt", PASSPORT_MRZ.encode(), "text/plain")},
         data={"document_type": "PASSPORT"},
     )
-    response = client.post(
-        f"{base}/selfie",
-        headers=headers,
-        files={"file": ("selfie.txt", b"LIVENESS_FAIL", "text/plain")},
-    )
-    assert response.status_code == 202
+    for attempt in range(settings.selfie_max_attempts):
+        response = client.post(
+            f"{base}/selfie",
+            headers=headers,
+            files={"file": ("selfie.txt", b"LIVENESS_FAIL", "text/plain")},
+        )
+        assert response.status_code == 202
+        state = response.json()
+        if attempt < settings.selfie_max_attempts - 1:
+            assert state["status"] == "IN_PROGRESS"
+            assert state["checks"]["LIVENESS"] == "RETRY"
+        else:
+            assert state["status"] == "REJECTED"
+            assert state["checks"]["LIVENESS"] == "FAILED"
 
     result = client.get(
         f"/v1/kyc/sessions/{session['session_id']}",

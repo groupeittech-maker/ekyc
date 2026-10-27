@@ -30,6 +30,12 @@ class CheckStatus(StrEnum):
     FAILED = "FAILED"
     REVIEW = "REVIEW"
     SKIPPED = "SKIPPED"
+    # Capture-quality problem: the user may re-submit (bounded attempts),
+    # distinct from FAILED — a blurry photo is not fraud evidence.
+    RETRY = "RETRY"
+
+
+OPEN_CHECK_STATUSES = {CheckStatus.PENDING, CheckStatus.RETRY}
 
 
 class Step(StrEnum):
@@ -41,6 +47,9 @@ class Step(StrEnum):
     FACE_MATCH = "FACE_MATCH"
     OTP = "OTP"
     SIGNATURE = "SIGNATURE"
+    # eMRTD chip read (passport NFC): passive authentication of SOD/DG hashes
+    # and the CSCA chain. Optional signal — absence of NFC is not a failure.
+    NFC = "NFC"
 
 
 class DocumentType(StrEnum):
@@ -52,7 +61,12 @@ class DocumentType(StrEnum):
 
 class ArtifactKind(StrEnum):
     DOCUMENT_IMAGE = "DOCUMENT_IMAGE"
+    DOCUMENT_VERSO = "DOCUMENT_VERSO"
     SELFIE = "SELFIE"
+    NFC_COM = "NFC_COM"
+    NFC_SOD = "NFC_SOD"
+    NFC_DG1 = "NFC_DG1"
+    NFC_DG2 = "NFC_DG2"
     CONTRACT = "CONTRACT"
     SIGNED_CONTRACT = "SIGNED_CONTRACT"
     TIMESTAMP_TOKEN = "TIMESTAMP_TOKEN"
@@ -82,6 +96,8 @@ class AuditEventType(StrEnum):
     OTP_SENT = "OTP_SENT"
     OTP_VERIFIED = "OTP_VERIFIED"
     OTP_FAILED = "OTP_FAILED"
+    NFC_SUBMITTED = "NFC_SUBMITTED"
+    NFC_VERIFIED = "NFC_VERIFIED"
     KYC_DECISION = "KYC_DECISION"
     CONTRACT_GENERATED = "CONTRACT_GENERATED"
     HASH_GENERATED = "HASH_GENERATED"
@@ -93,5 +109,8 @@ class AuditEventType(StrEnum):
     DECISION_OVERRIDDEN = "DECISION_OVERRIDDEN"
     PROCESSING_FAILED = "PROCESSING_FAILED"
     SESSION_EXPIRED = "SESSION_EXPIRED"
+    SESSION_TRANSFER_CREATED = "SESSION_TRANSFER_CREATED"
+    SESSION_TRANSFER_USED = "SESSION_TRANSFER_USED"
+    FRAUD_SIGNAL = "FRAUD_SIGNAL"
     WEBHOOK_DELIVERED = "WEBHOOK_DELIVERED"
     WEBHOOK_FAILED = "WEBHOOK_FAILED"

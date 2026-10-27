@@ -87,16 +87,19 @@ def test_capture_is_blocked_until_consent(client: TestClient, session: dict) -> 
 def test_consent_then_capture_is_allowed_and_audited(
     client: TestClient, session: dict, tenant: dict
 ) -> None:
+    from app.core.config import settings
+
     granted = client.post(
         f"{session['base']}/consent",
         headers=session["headers"],
-        json={"accepted": True, "policy_version": "v2"},
+        json={"accepted": True, "policy_version": settings.consent_policy_version},
     )
     assert granted.status_code == 200 and granted.json()["accepted"] is True
 
     context = client.get(f"{session['base']}/context", headers=session["headers"]).json()
     assert context["consent"]["given"] is True
-    assert context["consent"]["policy_version"] == "v2"
+    assert context["consent"]["policy_version"] == settings.consent_policy_version
+    assert context["consent_policy_version"] == settings.consent_policy_version
 
     uploaded = client.post(
         f"{session['base']}/document",
@@ -110,6 +113,20 @@ def test_consent_then_capture_is_allowed_and_audited(
     types = [e["event_type"] for e in audit["events"]]
     assert "CONSENT_GIVEN" in types
     assert types.index("CONSENT_GIVEN") < types.index("DOCUMENT_UPLOADED")
+
+
+def test_consent_with_unknown_policy_version_is_refused(
+    client: TestClient, session: dict
+) -> None:
+    """The dossier must record a consent text the platform actually publishes —
+    a client-asserted version is not accepted as evidence."""
+    response = client.post(
+        f"{session['base']}/consent",
+        headers=session["headers"],
+        json={"accepted": True, "policy_version": "v99"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "UNKNOWN_POLICY_VERSION"
 
 
 def test_consent_declined_is_recorded_and_blocks(

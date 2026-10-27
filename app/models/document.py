@@ -46,6 +46,11 @@ class Document(Base):
 
     document_type: Mapped[str] = mapped_column(String(32))
     artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"))
+    # Back side for TD1/TD2 documents (national ID cards): the MRZ lives on the
+    # verso while the portrait used for face matching stays on the recto.
+    verso_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("artifacts.id"), default=None
+    )
 
     ocr: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     verification: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

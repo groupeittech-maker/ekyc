@@ -32,20 +32,30 @@ voit qu'une session et un verdict.
 
 Statuts : `CREATED → IN_PROGRESS → PROCESSING → VERIFIED | REJECTED | REVIEW`, plus `EXPIRED`.
 
+Les checks portent en outre `RETRY` : un défaut de capture (MRZ illisible, visage absent,
+flou) invite à une nouvelle photo dans une borne `EKYC_DOCUMENT_MAX_ATTEMPTS` /
+`EKYC_SELFIE_MAX_ATTEMPTS`, puis escalade en `REVIEW`/`FAILED` — une mauvaise photo n'est
+jamais une preuve de fraude.
+
 Le client crée la session et reçoit une `verification_url`. L'utilisateur final quitte
 temporairement l'application du client, effectue les étapes dans l'UI eKYC, puis revient.
 L'UI n'utilise jamais le jeton du tenant : elle porte un jeton de session, limité à une session et
-à ses étapes.
+à ses étapes. Le jeton est retiré de l'URL côté navigateur (`history.replaceState`) ; le passage
+d'un parcours desktop vers mobile se fait par **code de transfert à usage unique** (QR
+rendu côté serveur, `/v1/verification/{id}/transfer` puis `/transfer/exchange`), qui frappera un
+bearer secondaire expirant avec la session.
 
 ## 3. Moteurs
 
 | Moteur | Fichier | Rôle |
 | --- | --- | --- |
-| Policy | `app/engines/policy.py` | Documents acceptés, étapes requises, sévérité des échecs |
-| Identity | `app/engines/identity.py` | OCR → authenticité → expiration → identité structurée |
-| Biometrics | `app/engines/biometrics.py` | Liveness d'abord, puis face matching |
-| OTP | `app/engines/otp.py` | Envoi/vérification, code haché, jamais exposé |
-| Decision | `app/engines/decision.py` | Agrège les checks en `VERIFIED / REJECTED / REVIEW` |
+| Policy | `app/engines/policy.py` | Documents acceptés, étapes requises et optionnelles, sévérité des échecs |
+| Identity | `app/engines/identity.py` | OCR → authenticité → expiration → identité structurée ; MRZ TD3/TD1/TD2, recto+verso, signaux VIZ/ELA/moiré |
+| Biometrics | `app/engines/biometrics.py` | Liveness d'abord, puis face matching ; antispoof requis en prod |
+| NFC/PKI | `app/engines/passport_pki.py` | eMRTD : EF.COM, SOD, hashes DG, signature DSC, chaîne CSCA → VALID/INVALID/INDETERMINATE |
+| Fraud | `app/engines/fraud.py` | Signaux inter-sessions par tenant : doublon de document (HIGH → REVIEW), destination OTP réutilisée, vélocité IP |
+| OTP | `app/engines/otp.py` | Envoi/vérification, code haché, destination pouvant être imposée par le tenant |
+| Decision | `app/engines/decision.py` | Conditions bloquantes vs signaux ; `RULES_VERSION` + versions policy/modèles dans l'audit |
 | Audit | `app/engines/audit.py` | Journal append-only chaîné |
 | Signature | `app/engines/signature_manager.py` | Registre de signataires (`platform` = RSA local ; un DSS/CA externe implémente `Signer`), cycle de vie du certificat (empreinte + expiration dans la preuve) |
 | Timestamp | `app/engines/tsa.py` | Registre TSA : interne (soft, non qualifié) ou connecteurs RFC 3161 nommés ; vérification des jetons (imprint, genTime, chaîne si CA de confiance) |
@@ -55,8 +65,15 @@ La distinction demandée est respectée dans le modèle : OCR (« je lis »), do
 la personne ») sont trois checks séparés, comme liveness et face match.
 
 Les providers sont pluggables (`app/engines/providers/`) : `stub` déterministe pour le
-développement, MRZ TD3 réel avec chiffres de contrôle, Tesseract optionnel, sender OTP HTTP.
+développement, MRZ TD3/TD1/TD2 réel avec chiffres de contrôle, Tesseract optionnel, sender OTP HTTP.
 Brancher un fournisseur commercial revient à implémenter l'interface de `providers/base.py`.
+
+**Passeport électronique (NFC).** L'app mobile lit la puce et envoie EF.COM/EF.SOD/DG1/DG2 à
+`POST /v1/verification/{id}/nfc` ; l'authentification passive est recalculée côté serveur :
+hashes des data groups signés dans le SOD, attribut `messageDigest`, signature CMS du DSC,
+chaînage vers le magasin CSCA (`EKYC_CSCA_DIR`). NFC est une étape **optionnelle** de la policy :
+son absence ne pénalise pas, un hash ou une signature invalide rejette, une CSCA inconnue passe en
+revue (`INDETERMINATE`). Le coffre conserve les groupes lus comme artefacts `NFC_*`.
 
 ### 3 bis. Orchestrateur réglementaire (`app/engines/orchestrator.py`)
 
@@ -154,6 +171,11 @@ stockés.
 Le client reçoit le strict nécessaire : statut, checks métier, identité utile, KYC ID et, à la
 demande, le document scellé. Images, selfies, scores bruts et réponses des fournisseurs restent
 internes. `public_result()` (`app/services/kyc.py`) est le seul point de sortie.
+
+Deux engagements supplémentaires : le tenant peut **imposer la destination OTP** à la création
+(`otp_destination` — l'utilisateur ne peut pas substituer un autre numéro, l'OTP prouve alors le
+contrôle du numéro déclaré), et la version du texte de consentement est fixée côté serveur
+(`EKYC_CONSENT_POLICY_VERSION`) — une version affirmée par le client est refusée.
 
 ## 8. Traitements asynchrones
 

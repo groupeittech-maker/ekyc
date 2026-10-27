@@ -15,11 +15,16 @@ class FlowPolicy:
     label: str
     accepted_documents: tuple[DocumentType, ...]
     steps: tuple[Step, ...]
+    # Optional signals: counted only when actually submitted (e.g. NFC chip
+    # read — an NFC-less device is not penalised, a forged chip is).
+    optional_steps: frozenset[Step] = field(default_factory=frozenset)
     # Steps that put the session in REVIEW instead of REJECTED when they fail.
     review_on_failure: frozenset[Step] = field(default_factory=frozenset)
     requires_signature: bool = False
     # End-user consent gates data capture — on for every flow by default.
     requires_consent: bool = True
+    # Versioned: recorded in KYC_DECISION audit events.
+    policy_version: str = "1.0"
 
     def requires(self, step: Step) -> bool:
         return step in self.steps
@@ -38,6 +43,7 @@ TRAVEL_INSURANCE = FlowPolicy(
         Step.FACE_MATCH,
         Step.OTP,
     ),
+    optional_steps=frozenset({Step.NFC}),
     review_on_failure=frozenset({Step.DOCUMENT_VERIFICATION, Step.FACE_MATCH}),
     requires_signature=True,
 )

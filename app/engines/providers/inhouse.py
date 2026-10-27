@@ -19,6 +19,7 @@ lightweight.
 from __future__ import annotations
 
 import io
+import logging
 from typing import Any
 
 from app.core.config import settings
@@ -31,7 +32,9 @@ from app.engines.providers.base import (
     OcrResult,
 )
 from app.engines.providers.models import model_path
-from app.engines.providers.mrz import find_mrz, parse_td3
+from app.engines.providers.mrz import find_mrz, parse_mrz
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -147,12 +150,19 @@ class InHouseFaceProvider(FaceProvider):
         self._antispoof_failed = False
 
     def _load_antispoof(self):
+        """Fail-closed: without the anti-spoofing model, a sharp printed photo
+        can defeat the heuristic — in production the provider must not silently
+        degrade; the task fails permanently and the check goes to REVIEW."""
         if self._antispoof is not None or self._antispoof_failed:
             return self._antispoof
         try:
             self._antispoof = _antispoof.AntiSpoofProvider()
         except Exception:
             self._antispoof_failed = True
+            if settings.environment == "production":
+                logger.exception("anti-spoofing model unavailable — refusing heuristic liveness")
+                raise
+            logger.warning("anti-spoofing model unavailable — heuristic liveness only (dev)")
         return self._antispoof
 
     def liveness(self, selfie: bytes) -> FaceResult:
@@ -270,7 +280,7 @@ class InHouseOcrProvider(OcrProvider):
     def extract(self, image: bytes, document_type: str) -> OcrResult:
         mrz, text = self._read_mrz(image)
         if mrz:
-            fields = parse_td3(*mrz)
+            fields = parse_mrz(mrz)
             fields["document_type"] = document_type
             return OcrResult(
                 fields=fields,
@@ -281,7 +291,58 @@ class InHouseOcrProvider(OcrProvider):
         return OcrResult(fields={}, raw_text=text, confidence=0.0, provider=self.name)
 
     @staticmethod
-    def _ela_signals(image: bytes) -> dict[str, float]:
+    def _moire_signals(image: bytes) -> dict[str, float]:
+        """Screen-recapture (moiré) detection via FFT.
+
+        Photographing a screen leaves strong periodic high-frequency peaks
+        (the pixel grid); an original document photograph is spectrally
+        smoother. Returns ``moire_score`` in [0,1] — higher = cleaner.
+        """
+        import numpy as np
+
+        engine = _CvEngine.instance()
+        try:
+            img = engine.decode(image)
+        except ValueError:
+            return {"moire_peaks": 0, "moire_score": 0.5}
+        gray = engine.cv2.cvtColor(img, engine.cv2.COLOR_BGR2GRAY)
+        gray = engine.cv2.resize(gray, (512, 512)).astype(np.float32)
+
+        spectrum = np.log1p(np.abs(np.fft.fftshift(np.fft.fft2(gray))))
+        h = spectrum.shape[0]
+        y, x = np.ogrid[:h, :h]
+        center = h // 2
+        radius = np.sqrt((x - center) ** 2 + (y - center) ** 2)
+        # Periodic screen grids live in the mid/high frequency ring.
+        ring = spectrum[(radius > h * 0.12) & (radius < h * 0.45)]
+        if ring.size == 0:
+            return {"moire_peaks": 0, "moire_score": 0.5}
+        mean, std = float(ring.mean()), float(ring.std()) or 1.0
+        peaks = float((ring > mean + 5.5 * std).sum())
+        # Empirical: a clean capture has < ~40 strong periodic peaks.
+        suspicion = _clamp(peaks / 40.0)
+        return {"moire_peaks": int(peaks), "moire_score": round(1.0 - suspicion, 4)}
+
+    @staticmethod
+    def _viz_signals(ocr: OcrResult) -> dict[str, bool]:
+        """MRZ / visual-inspection-zone cross-check.
+
+        The MRZ is trivial to forge with valid check digits; the same data
+        must also appear in the printed zone (names, document number).
+        Missing raw text (single-side capture that already carried the MRZ)
+        is not penalised.
+        """
+        raw = (ocr.raw_text or "").upper()
+        if not raw or not ocr.fields.get("checks_passed"):
+            return {}
+        surname = (ocr.fields.get("last_name") or "").upper().strip()
+        doc_number = (ocr.fields.get("document_number") or "").upper().strip()
+        signals: dict[str, bool] = {}
+        if surname:
+            signals["viz_surname_present"] = surname in raw
+        if doc_number:
+            signals["viz_doc_number_present"] = doc_number in raw
+        return signals
         """Error Level Analysis: high residual on a re-saved JPEG can reveal editing.
 
         Returns a low score (0..1) when the image is very likely a re-saved or
@@ -322,24 +383,40 @@ class InHouseOcrProvider(OcrProvider):
         img, _ = self._preprocess(image)
         sharpness = engine.sharpness(img)
         faces = engine.detect_faces(img)
+        mrz_found = bool(ocr.fields) and ocr.fields.get("mrz_side", -1) >= 0
         mrz_ok = bool(ocr.fields.get("checks_passed"))
         ela = self._ela_signals(image)
+        moire = self._moire_signals(image)
+        viz = self._viz_signals(ocr)
+        # VIZ cross-check only helps when the reference text was searchable.
+        viz_score = (sum(viz.values()) / len(viz)) if viz else 0.5
 
         signals: dict[str, Any] = {
             "sharpness": round(sharpness, 2),
             "portrait_detected": bool(len(faces) > 0),
             "mrz_checks_passed": mrz_ok,
             "mrz_checks": ocr.fields.get("checks"),
+            **viz,
             **ela,
+            **moire,
         }
-        # Weighted evidence: MRZ integrity dominates, then a legible portrait,
-        # then ELA / capture quality.
+        # Weighted, explainable evidence — MRZ check digits alone no longer
+        # suffice: they are computable by a forger, so the printed zone and
+        # screen/capture signals must corroborate.
         confidence = (
-            (0.55 if mrz_ok else 0.0)
-            + (0.25 if len(faces) > 0 else 0.0)
-            + 0.10 * _clamp(sharpness / (settings.liveness_min_sharpness * 2.0))
-            + 0.10 * ela["ela_score"]
+            (0.40 if mrz_ok else 0.0)
+            + (0.20 if len(faces) > 0 else 0.0)
+            + 0.15 * viz_score
+            + 0.15 * ela["ela_score"]
+            + 0.10 * moire["moire_score"]
         )
+        # A parsed MRZ whose check digits FAIL is a red flag (either OCR noise
+        # or a hand-typed fake) — it can never look authentic on its own.
+        if mrz_found and not mrz_ok:
+            confidence = min(confidence, 0.4)
+        # A strong moiré pattern caps the score: likely a photo of a screen.
+        if moire["moire_peaks"] >= 40:
+            confidence = min(confidence, 0.45)
         confidence = round(_clamp(confidence), 4)
         return DocumentAuthenticityResult(
             authentic=confidence >= 0.6,

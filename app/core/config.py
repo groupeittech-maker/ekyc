@@ -122,6 +122,20 @@ class Settings(BaseSettings):
     face_match_threshold: float = 0.80
     liveness_threshold: float = 0.70
     document_review_threshold: float = 0.60
+    # Bounded recapture: quality-related failures return RETRY while the user
+    # still has attempts left; afterwards the check escalates (REVIEW/FAILED).
+    document_max_attempts: int = 3
+    selfie_max_attempts: int = 3
+    # Consent policy version accepted by the platform (sent back in /context;
+    # a client-asserted mismatch is refused — the proof must name a real version).
+    consent_policy_version: str = "v1"
+    # Cross-device handoff (continue on phone via QR code): TTL of the
+    # one-time transfer code.
+    transfer_ttl_seconds: int = 120
+    # eMRTD passive authentication: directory of CSCA master-list certificates
+    # (PEM or DER) used to chain Document Signer certificates. Empty dir/absent
+    # CSCA => NFC verdict INDETERMINATE, never "forged".
+    csca_dir: str = "./var/keys/csca"
 
     # Risk engine: overall confidence score (0-100) computed from per-step
     # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.

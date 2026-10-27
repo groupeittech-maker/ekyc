@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
   <title>Verification d'identite</title>
   <style>
-    :root { --brand: #0b5fff; --ok: #0a8f4d; --ko: #c62828; --bg: #f5f6fa; }
+    :root { --brand: #0b5fff; --ok: #0a8f4d; --ko: #c62828; --warn: #b26a00; --bg: #f5f6fa; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: #16181d; }
     main { max-width: 560px; margin: 0 auto; padding: 24px 16px 64px; }
@@ -19,14 +20,20 @@
     input, select, button { width: 100%; padding: 11px; font-size: 15px; border-radius: 8px; border: 1px solid #d3d7e0; margin-bottom: 10px; }
     button { background: var(--brand); color: #fff; border: none; font-weight: 600; cursor: pointer; }
     button[disabled] { opacity: .5; cursor: progress; }
+    button.secondary { background: #eef1f7; color: #16181d; }
+    video, canvas { width: 100%; border-radius: 8px; background: #000; margin-bottom: 10px; }
+    canvas { display: none; }
+    img.qr { display: block; margin: 8px auto; max-width: 220px; }
     ul.checks { list-style: none; padding: 0; margin: 0; }
     ul.checks li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #eef0f5; font-size: 14px; }
     .PASSED { color: var(--ok); font-weight: 600; }
     .FAILED { color: var(--ko); font-weight: 600; }
-    .PENDING, .REVIEW { color: #b26a00; font-weight: 600; }
+    .PENDING, .REVIEW { color: var(--warn); font-weight: 600; }
+    .RETRY { color: var(--brand); font-weight: 600; }
     .status { font-size: 16px; font-weight: 700; }
     .muted { color: #6b7280; font-size: 12px; }
     .error { color: var(--ko); font-size: 13px; min-height: 18px; }
+    .retry-hint { color: var(--brand); font-size: 13px; }
   </style>
 </head>
 <body>
@@ -57,14 +64,29 @@
     <h2>2. Document d'identite</h2>
     <label for="document-type">Type de document</label>
     <select id="document-type"></select>
-    <label for="document-file">Photo du document</label>
-    <input type="file" id="document-file" accept="image/*,application/pdf,text/plain" />
+    <p class="retry-hint" id="document-retry" hidden>La photo n'etait pas lisible. Recommencez en vous rapprochant, sans reflets.</p>
+    <label for="document-file">Photo du document (recto)</label>
+    <input type="file" id="document-file" accept="image/*" capture="environment" />
+    <div id="document-verso-block" hidden>
+      <label for="document-verso-file">Verso du document (pour les cartes d'identite)</label>
+      <input type="file" id="document-verso-file" accept="image/*" capture="environment" />
+    </div>
+    <button class="secondary" id="document-camera">Utiliser la camera</button>
+    <video id="document-video" hidden playsinline></video>
+    <button id="document-shoot" hidden>Prendre la photo</button>
     <button id="document-submit">Envoyer le document</button>
   </section>
 
   <section id="step-selfie" hidden>
     <h2>3. Selfie et preuve de vie</h2>
-    <input type="file" id="selfie-file" accept="image/*,text/plain" capture="user" />
+    <p class="retry-hint" id="selfie-retry" hidden>La capture n'a pas ete retenue. Recentrez votre visage, dans un endroit eclaire.</p>
+    <video id="selfie-video" playsinline></video>
+    <button class="secondary" id="selfie-camera">Activer la camera</button>
+    <button id="selfie-shoot" hidden>Prendre la photo</button>
+    <canvas id="selfie-canvas"></canvas>
+    <details class="muted"><summary>Ou choisir un fichier</summary>
+      <input type="file" id="selfie-file" accept="image/*" />
+    </details>
     <button id="selfie-submit">Envoyer le selfie</button>
   </section>
 
@@ -72,10 +94,19 @@
     <h2>4. Code de verification</h2>
     <label for="otp-destination">Numero de telephone ou email</label>
     <input type="text" id="otp-destination" placeholder="+242 06 000 00 00" />
+    <p class="muted" id="otp-bound" hidden>Le code sera envoye au numero declare par votre operateur.</p>
     <button id="otp-send">Recevoir le code</button>
     <label for="otp-code">Code recu</label>
     <input type="text" id="otp-code" inputmode="numeric" autocomplete="one-time-code" />
     <button id="otp-verify">Valider le code</button>
+  </section>
+
+  <section id="step-handoff" hidden>
+    <h2>Continuer sur votre telephone</h2>
+    <p class="muted">La lecture NFC du passeport et la camera sont plus simples sur mobile. Scannez ce code — il expire dans deux minutes et n'est utilisable qu'une fois.</p>
+    <img class="qr" id="handoff-qr" alt="Code QR de transfert" hidden />
+    <p class="muted" id="handoff-url"></p>
+    <button id="handoff-create">Generer le code de transfert</button>
   </section>
 
   <section id="final" hidden>
@@ -93,14 +124,44 @@
 
 <script>
 const sessionId = {{ session_id | tojson }};
-const token = {{ token | tojson }};
+// The session token arrives in the URL once (verification_url) or via a
+// one-time transfer code; it is kept in memory only and scrubbed from the
+// address bar so it never lingers in history, Referer or proxy logs.
+let token = {{ token | tojson }};
+const transferCode = {{ transfer | tojson }};
 const api = (path) => `/v1/verification/${sessionId}${path}`;
-const headers = { Authorization: `Bearer ${token}` };
 const $ = (id) => document.getElementById(id);
+
+function cleanUrl() {
+  if (location.search && history.replaceState) {
+    history.replaceState(null, "", location.pathname);
+  }
+}
+
+async function resolveToken() {
+  if (token) { cleanUrl(); return; }
+  if (!transferCode) throw new Error("Lien de verification invalide");
+  const response = await fetch(api("/transfer/exchange"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: transferCode }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail === "Invalid or expired transfer code"
+    ? "Ce code de transfert a expire ou a deja ete utilise. Regenerez-en un depuis l'autre appareil."
+    : (body.detail || `Erreur ${response.status}`));
+  token = body.token;
+  cleanUrl();
+}
+
+const headers = () => ({ Authorization: `Bearer ${token}` });
 
 let steps = [];
 let consentRequired = false;
 let consentGiven = false;
+let consentPolicyVersion = "v1";
+let capturedSelfie = null;
+let capturedDocument = null;
 
 const TERMINAL = {
   VERIFIED: "Votre identite est verifiee. Vous pouvez revenir a l'application.",
@@ -112,27 +173,45 @@ const TERMINAL = {
 function showError(message) { $("error").textContent = message || ""; }
 
 async function call(path, options = {}) {
-  const response = await fetch(api(path), { ...options, headers: { ...headers, ...(options.headers || {}) } });
+  const response = await fetch(api(path), { ...options, headers: { ...headers(), ...(options.headers || {}) } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail || `Erreur ${response.status}`);
   return body;
 }
 
+const CHECK_LABELS = {
+  DOCUMENT_VERIFICATION: "Document",
+  LIVENESS: "Preuve de vie",
+  FACE_MATCH: "Correspondance du visage",
+  OTP: "Code de verification",
+  NFC: "Passeport electronique",
+  SIGNATURE: "Signature",
+};
+const STATUS_LABELS = {
+  PASSED: "Valide", FAILED: "Non valide", REVIEW: "En revue",
+  RETRY: "A reprendre", PENDING: "En attente", SKIPPED: "Ignore",
+};
+
 function renderChecks(checks, status) {
   $("checks").innerHTML = Object.entries(checks)
-    .map(([name, value]) => `<li><span>${name}</span><span class="${value}">${value}</span></li>`)
+    .map(([name, value]) => `<li><span>${CHECK_LABELS[name] || name}</span><span class="${value}">${STATUS_LABELS[value] || value}</span></li>`)
     .join("");
   $("status").textContent = status;
   $("status").className = status;
 }
 
 function refreshVisibility(checks, status) {
-  const done = (name) => checks[name] && checks[name] !== "PENDING";
+  // RETRY is not done: the step stays open for a new capture.
+  const done = (name) => ["PASSED", "FAILED", "REVIEW", "SKIPPED"].includes(checks[name]);
+  const retrying = (name) => checks[name] === "RETRY";
+  $("document-retry").hidden = !retrying("DOCUMENT_VERIFICATION");
+  $("selfie-retry").hidden = !(retrying("LIVENESS") || retrying("FACE_MATCH"));
+
   const finalMessage = TERMINAL[status];
   $("final").hidden = !finalMessage;
   if (finalMessage) {
     $("final-message").textContent = finalMessage;
-    for (const step of ["step-consent", "step-document", "step-selfie", "step-otp"]) $(step).hidden = true;
+    for (const step of ["step-consent", "step-document", "step-selfie", "step-otp", "step-handoff"]) $(step).hidden = true;
     return;
   }
   const captureBlocked = consentRequired && !consentGiven;
@@ -141,6 +220,7 @@ function refreshVisibility(checks, status) {
   $("step-selfie").hidden = captureBlocked || !steps.includes("LIVENESS") || !done("DOCUMENT_VERIFICATION") || done("LIVENESS");
   $("step-otp").hidden = captureBlocked || !steps.includes("OTP") || done("OTP")
     || (steps.includes("LIVENESS") && !done("LIVENESS"));
+  $("step-handoff").hidden = captureBlocked || (status !== "IN_PROGRESS" && status !== "CREATED");
 }
 
 function update(state) {
@@ -149,53 +229,116 @@ function update(state) {
 }
 
 async function bootstrap() {
+  await resolveToken();
   const context = await call("/context");
   steps = context.steps;
   consentRequired = !!(context.consent && context.consent.required);
   consentGiven = !!(context.consent && context.consent.given);
+  consentPolicyVersion = context.consent_policy_version || "v1";
   $("flow-label").textContent = context.flow_label;
   $("document-type").innerHTML = context.accepted_documents
     .map((doc) => `<option value="${doc}">${doc}</option>`).join("");
+  if (context.otp_destination) {
+    $("otp-destination").value = context.otp_destination;
+    $("otp-destination").readOnly = true;
+    $("otp-bound").hidden = false;
+  }
   update(context);
+  toggleVersoInput();
 }
 
-async function upload(path, input) {
-  if (!input.files.length) throw new Error("Selectionnez un fichier");
-  const form = new FormData();
-  form.append("file", input.files[0]);
-  if (path === "/document") form.append("document_type", $("document-type").value);
-  return call(path, { method: "POST", body: form });
+function toggleVersoInput() {
+  const type = $("document-type").value;
+  $("document-verso-block").hidden = type === "PASSPORT";
 }
 
-function bind(id, handler) {
-  $(id).addEventListener("click", async () => {
-    const button = $(id);
-    button.disabled = true;
-    showError("");
-    try { update(await handler()); } catch (error) { showError(error.message); }
-    button.disabled = false;
+// --- Camera capture --------------------------------------------------------
+async function openCamera(video, facingMode) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode, width: { ideal: 1280 } },
+    audio: false,
   });
+  video.srcObject = stream;
+  await video.play();
+  return stream;
 }
+
+function captureFrame(video) {
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+}
+
+let selfieStream = null;
+let documentStream = null;
+
+bind("selfie-camera", async () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Camera indisponible — utilisez le choix de fichier ci-dessous");
+  }
+  selfieStream = await openCamera($("selfie-video"), "user");
+  $("selfie-shoot").hidden = false;
+});
+
+bind("selfie-shoot", async () => {
+  capturedSelfie = await captureFrame($("selfie-video"));
+  showError("Photo capturee — envoyez-la avec le bouton ci-dessous.");
+});
+
+bind("document-camera", async () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Camera indisponible — choisissez une photo du document");
+  }
+  documentStream = await openCamera($("document-video"), "environment");
+  $("document-video").hidden = false;
+  $("document-shoot").hidden = false;
+});
+
+bind("document-shoot", async () => {
+  capturedDocument = await captureFrame($("document-video"));
+  showError("Photo capturee — envoyez-la avec le bouton ci-dessous.");
+});
+// ---------------------------------------------------------------------------
 
 bind("consent-submit", async () => {
   if (!$("consent-check").checked) throw new Error("Merci de confirmer votre consentement pour continuer");
   await call("/consent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accepted: true, policy_version: "v1" }),
+    body: JSON.stringify({ accepted: true, policy_version: consentPolicyVersion }),
   });
   consentGiven = true;
   return call("/status");
 });
 
 bind("document-submit", async () => {
-  await upload("/document", $("document-file"));
-  return call("/status");
+  const input = $("document-file");
+  if (!capturedDocument && !input.files.length) throw new Error("Selectionnez ou photographiez le document");
+  const form = new FormData();
+  form.append("document_type", $("document-type").value);
+  form.append("file", capturedDocument || input.files[0]);
+  const verso = $("document-verso-file");
+  if (verso.files.length) form.append("file_verso", verso.files[0]);
+  return call("/document", { method: "POST", body: form });
 });
 
 bind("selfie-submit", async () => {
-  await upload("/selfie", $("selfie-file"));
-  return call("/status");
+  const input = $("selfie-file");
+  if (!capturedSelfie && !input.files.length) throw new Error("Prenez ou choisissez une photo");
+  const form = new FormData();
+  form.append("file", capturedSelfie || input.files[0], "selfie.jpg");
+  return call("/selfie", { method: "POST", body: form });
+});
+
+bind("handoff-create", async () => {
+  const result = await call("/transfer", { method: "POST" });
+  $("handoff-url").textContent = result.transfer_url;
+  if (result.qr_data_uri) {
+    $("handoff-qr").src = result.qr_data_uri;
+    $("handoff-qr").hidden = false;
+  }
 });
 
 bind("otp-send", async () => {
@@ -216,6 +359,21 @@ bind("otp-verify", async () => {
   if (!result.verified) showError("Code incorrect");
   return call("/status");
 });
+
+function bind(id, handler) {
+  $(id).addEventListener("click", async () => {
+    const button = $(id);
+    button.disabled = true;
+    showError("");
+    try {
+      const result = await handler();
+      if (result) update(result);
+    } catch (error) { showError(error.message); }
+    button.disabled = false;
+  });
+}
+
+$("document-type").addEventListener("change", toggleVersoInput);
 
 bootstrap().catch((error) => showError(error.message));
 </script>

@@ -17,13 +17,28 @@ logging.basicConfig(level=logging.INFO)
 templates = Jinja2Templates(directory="app/web/templates")
 
 
+def _production_readiness_checks() -> None:
+    """Boot-time fail-closed checks that need runtime resources (models, keys).
+
+    The in-house face provider degrading to heuristic liveness would silently
+    weaken spoof resistance — production refuses to boot without the
+    anti-spoofing model.
+    """
+    if settings.face_provider == "inhouse":
+        from app.engines.providers.antispoof import AntiSpoofProvider
+
+        AntiSpoofProvider()  # raises if the model is missing or fails integrity
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     import app.models  # noqa: F401 - register the mappers before create_all
     from app.core.config import validate_production_settings
 
     validate_production_settings()  # fail fast on dev-grade secrets in prod
-    if settings.environment != "production":
+    if settings.environment == "production":
+        _production_readiness_checks()
+    else:
         # Production schema changes go through Alembic migrations.
         Base.metadata.create_all(bind=engine)
     yield
@@ -54,10 +69,16 @@ def health() -> dict[str, object]:
 
 
 @app.get("/verify/{session_id}", response_class=HTMLResponse, tags=["verification"])
-def verification_ui(request: Request, session_id: str, token: str = "") -> HTMLResponse:
-    """Hosted verification interface opened by the end-user."""
+def verification_ui(
+    request: Request, session_id: str, token: str = "", transfer: str = ""
+) -> HTMLResponse:
+    """Hosted verification interface opened by the end-user.
+
+    ``token`` is the session bearer (scrubbed from the URL client-side);
+    ``transfer`` is a one-time handoff code exchanged for a fresh bearer.
+    """
     return templates.TemplateResponse(
         request=request,
         name="verify.html",
-        context={"session_id": session_id, "token": token},
+        context={"session_id": session_id, "token": token, "transfer": transfer},
     )

@@ -1,15 +1,17 @@
 """KYC Decision Engine: turns per-step results into a single status and score.
 
-Each decidable step contributes a confidence (0..1) weighted by its business
-importance. The weighted average produces an overall risk/confidence score
-(0..100). The score then maps to:
+Blocking conditions and risk signals stay separate — a strong face match can
+never compensate a failed check:
 
-    score >= accept_threshold  -> ACCEPT / VERIFIED
-    score >= review_threshold  -> REVIEW
-    else                       -> REJECT
+    any REQUIRED step FAILED and not reviewable   -> REJECTED
+    any step FAILED marked reviewable / REVIEW    -> REVIEW
+    any step PENDING or RETRY                     -> IN_PROGRESS
+    optional step (e.g. NFC) submitted & FAILED   -> REJECTED
+    otherwise the informational score maps to
+    ACCEPT / REVIEW / REJECT at the thresholds.
 
-Hard-fail steps (e.g. liveness) still short-circuit to REJECT regardless of
-the global score.
+``RULES_VERSION`` is recorded in every KYC_DECISION audit event so a past
+decision can always be traced back to the exact ruleset that produced it.
 """
 
 from __future__ import annotations
@@ -20,6 +22,10 @@ from typing import Any
 from app.core.config import settings
 from app.engines.policy import FlowPolicy
 from app.models.enums import CheckStatus, SessionStatus, Step
+
+# Bump whenever the decision semantics below change — recorded in every
+# KYC_DECISION audit event for reproducibility.
+RULES_VERSION = "1.1"
 
 # Steps handled by other engines and not reported on their own.
 _HIDDEN_STEPS = {Step.OCR, Step.SELFIE, Step.DOCUMENT}
@@ -34,6 +40,7 @@ _STEP_WEIGHTS: dict[Step, float] = {
     Step.FACE_MATCH: 25.0,
     Step.OTP: 15.0,
     Step.SIGNATURE: 5.0,
+    Step.NFC: 15.0,  # optional — only weighed when the chip was actually read
 }
 
 
@@ -60,6 +67,20 @@ def decidable_steps(policy: FlowPolicy) -> list[Step]:
     return [step for step in policy.steps if step not in _HIDDEN_STEPS]
 
 
+def _active_steps(policy: FlowPolicy, checks: dict[str, str]) -> list[Step]:
+    """Required steps plus optional steps that were actually attempted.
+
+    An optional step absent from ``checks`` (e.g. no NFC-capable device) is
+    ignored entirely — missing NFC is not fraud. Once submitted it gates like
+    a normal step, and a FAILED optional step is fraud evidence (hard reject).
+    """
+    steps = decidable_steps(policy)
+    for step in policy.optional_steps:
+        if step in checks and step not in steps:
+            steps.append(step)
+    return steps
+
+
 def _step_confidence(step: Step, status: str, internal: dict[str, Any] | None) -> float:
     data = (internal or {}).get(str(step), {})
     if status in (str(CheckStatus.PASSED), str(CheckStatus.REVIEW)):
@@ -81,12 +102,15 @@ def _step_confidence(step: Step, status: str, internal: dict[str, Any] | None) -
 
 
 def _compute_risk(
-    policy: FlowPolicy, checks: dict[str, str], internal: dict[str, Any] | None
+    policy: FlowPolicy,
+    checks: dict[str, str],
+    internal: dict[str, Any] | None,
+    steps: list[Step],
 ) -> tuple[float, list[StepContribution]]:
     contributions: list[StepContribution] = []
     total = 0.0
     weighted = 0.0
-    for step in decidable_steps(policy):
+    for step in steps:
         status = checks.get(str(step), CheckStatus.PENDING)
         if str(status) in (str(CheckStatus.PENDING), str(CheckStatus.SKIPPED)):
             continue
@@ -121,18 +145,21 @@ def decide(
     checks: dict[str, str],
     internal: dict[str, Any] | None = None,
 ) -> Decision:
-    required = decidable_steps(policy)
+    steps = _active_steps(policy, checks)
     pending = [
         step
-        for step in required
-        if checks.get(str(step), CheckStatus.PENDING) == CheckStatus.PENDING
+        for step in steps
+        if checks.get(str(step), CheckStatus.PENDING)
+        in (CheckStatus.PENDING, CheckStatus.RETRY)
     ]
-    failed = [step for step in required if checks.get(str(step)) == CheckStatus.FAILED]
-    review = [step for step in required if checks.get(str(step)) == CheckStatus.REVIEW]
+    failed = [step for step in steps if checks.get(str(step)) == CheckStatus.FAILED]
+    review = [step for step in steps if checks.get(str(step)) == CheckStatus.REVIEW]
     hard_failures = [
         step
         for step in failed
-        if step in _HARD_REJECT_STEPS or step not in policy.review_on_failure
+        if step in _HARD_REJECT_STEPS
+        or step in policy.optional_steps
+        or step not in policy.review_on_failure
     ]
     soft_failures = [step for step in failed if step not in hard_failures]
 
@@ -146,12 +173,15 @@ def decide(
         )
 
     has_reviews = bool(soft_failures or review)
-    score, contributions = _compute_risk(policy, checks, internal)
+    score, contributions = _compute_risk(policy, checks, internal, steps)
 
     if pending:
         return Decision(
             SessionStatus.IN_PROGRESS,
-            [f"{step}_PENDING" for step in pending],
+            [
+                f"{step}_{'RETRY' if checks.get(str(step)) == CheckStatus.RETRY else 'PENDING'}"
+                for step in pending
+            ],
             completed=False,
             score=score,
             risk_level="PENDING",
@@ -182,6 +212,21 @@ def decide(
         return Decision(
             SessionStatus.REVIEW,
             ["MEDIUM_CONFIDENCE"],
+            completed=True,
+            score=score,
+            risk_level="REVIEW",
+            contributions=contributions,
+        )
+
+    # High-severity fraud signals block a clean verification — they force a
+    # human review instead (re-verification can be legitimate, it is never
+    # silently auto-rejected either).
+    fraud = (internal or {}).get("fraud", {})
+    if fraud.get("level") == "HIGH":
+        codes = [signal["code"] for signal in fraud.get("signals", [])]
+        return Decision(
+            SessionStatus.REVIEW,
+            [f"FRAUD_SIGNAL:{','.join(codes)}"],
             completed=True,
             score=score,
             risk_level="REVIEW",

@@ -20,6 +20,7 @@ dependencies = [
     "pypdf==5.0.1",
     "python-multipart==0.0.9",
     "Jinja2==3.1.4",
+    "qrcode==7.4.2",
 ]
 
 [project.optional-dependencies]

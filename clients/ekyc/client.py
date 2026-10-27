@@ -92,6 +92,7 @@ class EkycClient:
         flow: str,
         metadata: dict[str, Any] | None = None,
         jurisdiction: str | None = None,
+        otp_destination: str | None = None,
     ) -> dict[str, Any]:
         """Create a session; returns the payload including ``verification_url``.
 
@@ -100,12 +101,17 @@ class EkycClient:
         document's country. It drives storage vault routing, retention and the
         required trust services. Falls back to the tenant's default
         jurisdiction, then the platform default.
+
+        ``otp_destination`` binds the OTP step to the phone number (or email)
+        the tenant already knows — the end-user cannot substitute another.
         """
         body: dict[str, Any] = {"customer_reference": customer_reference, "flow": flow}
         if metadata:
             body["metadata"] = metadata
         if jurisdiction:
             body["jurisdiction"] = jurisdiction
+        if otp_destination:
+            body["otp_destination"] = otp_destination
         response = self._http.post("/v1/kyc/sessions", json=body, headers=self._auth_headers())
         return _json_or_raise(response, "Session creation failed")
 

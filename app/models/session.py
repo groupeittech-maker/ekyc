@@ -21,6 +21,11 @@ class KycSession(Base):
     access_token_hash: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
+    # Cross-device handoff (QR code): a one-time code exchanged by the second
+    # device for the session bearer — hash only, short TTL, single use.
+    transfer_code_hash: Mapped[str | None] = mapped_column(String(128), default=None)
+    transfer_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
     # Regulatory context — snapshotted at creation by the orchestrator.
     jurisdiction: Mapped[str] = mapped_column(String(16), default="GLOBAL")
     vault_profile: Mapped[str] = mapped_column(String(64), default="default")

@@ -31,6 +31,14 @@ class OtpDeliveryError(OtpError):
     """Gateway delivery failed — surfaced as 503; no challenge is created."""
 
 
+def normalize_destination(destination: str) -> str:
+    """Canonical form for hashing/comparison — digits for phone numbers,
+    lowercased e-mail. Formatting noise must not defeat dedup signals."""
+    if "@" in destination:
+        return destination.strip().lower()
+    return "".join(ch for ch in destination if ch.isdigit())
+
+
 def mask_destination(destination: str) -> str:
     if "@" in destination:
         name, _, domain = destination.partition("@")
@@ -60,7 +68,7 @@ def _enforce_send_limits(session: KycSession, destination: str) -> None:
         raise OtpRateLimited("OTP send limit reached")
     if (
         ratelimit.hit(
-            f"otp:send:dest:{sha256_text(destination)}",
+            f"otp:send:dest:{sha256_text(normalize_destination(destination))}",
             settings.otp_send_window_seconds,
         )
         > settings.otp_max_sends_per_destination
@@ -105,7 +113,7 @@ def send_otp(
         tenant_id=session.tenant_id,
         channel=str(channel),
         destination_masked=mask_destination(destination),
-        destination_hash=sha256_text(destination),
+        destination_hash=sha256_text(normalize_destination(destination)),
         code_hash=hash_secret(code),
         expires_at=utcnow() + timedelta(seconds=settings.otp_ttl_seconds),
     )
