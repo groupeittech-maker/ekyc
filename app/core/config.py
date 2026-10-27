@@ -136,6 +136,8 @@ class Settings(BaseSettings):
     # (PEM or DER) used to chain Document Signer certificates. Empty dir/absent
     # CSCA => NFC verdict INDETERMINATE, never "forged".
     csca_dir: str = "./var/keys/csca"
+    # Optional JSON list of extra LDIF URLs for scripts/fetch_csca
+    csca_sources: str = "[]"
 
     # Risk engine: overall confidence score (0-100) computed from per-step
     # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
