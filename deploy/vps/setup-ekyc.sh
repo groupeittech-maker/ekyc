@@ -18,7 +18,8 @@ docker --version
 
 echo "== 2. Build & start stack =="
 docker compose -p ekyc \
-    -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps.yml \
+    -f docker-compose.yml -f docker-compose.prod.yml \
+    -f deploy/vps/docker-compose.vps.yml \
     up -d --build
 
 echo "== 3. Biometric models (one-shot fetchers) =="
