@@ -1,0 +1,5 @@
+# Host override for the dedicated eKYC VPS (srv1992558.hstgr.cloud).
+# The API stays loopback-only behind the system nginx on :8300.
+services:
+  api:
+    ports: ["127.0.0.1:8300:8000"]
