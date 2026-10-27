@@ -37,7 +37,7 @@ from pathlib import Path
 from app.core.config import settings
 
 DEFAULT_SOURCES = [
-    "https://www.bsi.bund.de/SharedDocs/Downloads/DE/BSI/ElekAusweise/CSCA/GermanMasterList.zip",
+    "https://www.bsi.bund.de/SharedDocs/Downloads/DE/BSI/ElekAusweise/CSCA/GermanMasterList.zip?__blob=publicationFile",
 ]
 
 _UA = {"User-Agent": "Mozilla/5.0 (eKYC masterlist fetcher)"}
