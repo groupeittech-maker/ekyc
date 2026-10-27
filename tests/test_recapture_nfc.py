@@ -304,8 +304,8 @@ def _tlv(tag: bytes, content: bytes) -> bytes:
 
 
 def _build_ef_com() -> bytes:
-    # EF.COM tag list uses the DG tag values: 0x61 = DG1, 0x62 = DG2.
-    return _tlv(0x60.to_bytes(1, "big"), _tlv(b"\x5f\x01", b"0108") + _tlv(b"\x5c", b"\x61\x62"))
+    # EF.COM tag list uses the real DG tag values: 0x61 = DG1, 0x75 = DG2.
+    return _tlv(0x60.to_bytes(1, "big"), _tlv(b"\x5f\x01", b"0108") + _tlv(b"\x5c", b"\x61\x75"))
 
 
 def _build_sod(dg1: bytes, dg2: bytes, tmp_path) -> tuple[bytes, bytes]:

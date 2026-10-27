@@ -141,6 +141,16 @@ def _first(seq: list[tuple[int, bytes, bytes]], tag: int) -> bytes | None:
 # --------------------------------------------------------------------------- #
 # EF.COM — declared data groups
 # --------------------------------------------------------------------------- #
+# ICAO 9303 data-group tags are NOT sequential: DG1=0x61, DG2=0x75, DG3=0x63,
+# DG4=0x76, DG5..DG16 = 0x65..0x70. EF.COM carries these tag values, so map
+# each tag byte to its data-group number.
+_DG_TAG_TO_NUMBER = {
+    0x61: 1, 0x75: 2, 0x63: 3, 0x76: 4,
+    0x65: 5, 0x66: 6, 0x67: 7, 0x68: 8, 0x69: 9, 0x6A: 10,
+    0x6B: 11, 0x6C: 12, 0x6D: 13, 0x6E: 14, 0x6F: 15, 0x70: 16,
+}
+
+
 def parse_ef_com(ef_com: bytes) -> dict:
     """Return {lds_version, dg_tags} — tag list tells which DGs the chip holds."""
     tag, content, _, _ = _read_tlv(ef_com)  # application tag 0x60 or plain SEQ
@@ -423,8 +433,12 @@ def verify_passport(
     provided = {n: d for n, d in groups.items() if d}
     details: dict = {"lds_version": com["lds_version"], "provided_dgs": sorted(provided)}
 
-    # EF.COM lists DG *tags* (0x61 = DG1, 0x62 = DG2, …); map to DG numbers.
-    declared = {tag - 0x60 for tag in com["dg_tags"]} if com["dg_tags"] else set(provided)
+    # EF.COM lists DG *tags* (0x61 = DG1, 0x75 = DG2, …); map to DG numbers.
+    declared = (
+        {_DG_TAG_TO_NUMBER.get(tag, tag - 0x60) for tag in com["dg_tags"]}
+        if com["dg_tags"]
+        else set(provided)
+    )
     missing = [n for n in provided if n not in declared]
     if missing:
         return PkiResult("INVALID", f"DG_NOT_IN_EF_COM:{missing}", details)
