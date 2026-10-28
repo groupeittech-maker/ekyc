@@ -82,8 +82,8 @@ class LocalKeySigner(Signer):
     def _self_signed(self) -> x509.Certificate:
         subject = issuer = x509.Name(
             [
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "IT-TECH eKYC"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "IT-TECH eKYC Dev Signing"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Trusdy eKYC"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "Trusdy eKYC Dev Signing"),
             ]
         )
         now = dt.datetime.now(dt.timezone.utc)

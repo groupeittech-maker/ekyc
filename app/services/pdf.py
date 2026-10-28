@@ -44,7 +44,7 @@ def render_kyc_certificate(
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     y = _header(
-        pdf, "CERTIFICAT DE VERIFICATION D'IDENTITE", "IT-TECH eKYC - Digital Trust Platform"
+        pdf, "CERTIFICAT DE VERIFICATION D'IDENTITE", "Trusdy eKYC — Digital Trust Platform"
     )
 
     y = _rows(
@@ -86,7 +86,7 @@ def render_contract(
 ) -> bytes:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
-    y = _header(pdf, title, f"{tenant_name} - genere via IT-TECH eKYC le {issued_at}")
+    y = _header(pdf, title, f"{tenant_name} - genere via Trusdy le {issued_at}")
     y = _rows(pdf, y, body)
     y -= 6 * mm
     pdf.setFont("Helvetica-Oblique", 9)

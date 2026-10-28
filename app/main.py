@@ -51,7 +51,7 @@ def _docs_enabled() -> bool:
 
 
 app = FastAPI(
-    title="IT-TECH eKYC",
+    title="Trusdy eKYC",
     description="Plateforme de confiance numerique: eKYC, signature electronique, preuve.",
     version="0.1.0",
     lifespan=lifespan,
