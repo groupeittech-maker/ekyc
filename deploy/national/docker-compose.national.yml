@@ -1,0 +1,72 @@
+# Trusdy National — self-contained production stack.
+# Usage:
+#   docker compose -f docker-compose.national.yml --env-file .env up -d --build
+# All public exposure stays behind the host nginx — the API binds loopback.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ekyc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ekyc
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U ekyc"], interval: 10s, timeout: 5s, retries: 5}
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: ["redisdata:/data"]
+
+  api:
+    build: {context: .}
+    restart: unless-stopped
+    env_file: [.env]
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports: ["${EKYC_BIND:-127.0.0.1}:8300:8000"]
+    volumes: ["archive:/srv/ekyc/var", "models:/srv/ekyc/var/models"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_started}}
+
+  worker-cpu:
+    build: {context: .}
+    restart: unless-stopped
+    env_file: [.env]
+    command: celery -A app.workers.celery_app:celery_app worker -l info -Q cpu -c 2
+    volumes: ["archive:/srv/ekyc/var"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_started}}
+
+  worker-gpu:
+    build: {context: .}
+    restart: unless-stopped
+    env_file: [.env]
+    command: celery -A app.workers.celery_app:celery_app worker -l info -Q gpu -c 1
+    volumes: ["archive:/srv/ekyc/var", "models:/srv/ekyc/var/models"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_started}}
+
+  beat:
+    build: {context: .}
+    restart: unless-stopped
+    env_file: [.env]
+    command: celery -A app.workers.celery_app:celery_app beat -l info --schedule /srv/ekyc/var/beat/celerybeat-schedule
+    volumes: ["beat-schedule:/srv/ekyc/var/beat"]
+
+  models-init:
+    build: {context: .}
+    env_file: [.env]
+    command: python -m scripts.fetch_models
+    volumes: ["models:/srv/ekyc/var/models"]
+    restart: "no"
+
+  antispoof-init:
+    build: {context: .}
+    env_file: [.env]
+    command: python -m scripts.fetch_antispoof
+    volumes: ["models:/srv/ekyc/var/models"]
+    restart: "no"
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  archive: {}
+  models: {}
+  beat-schedule: {}
