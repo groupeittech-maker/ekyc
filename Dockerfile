@@ -12,6 +12,7 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY apps ./apps
 RUN pip install --no-cache-dir ".[ocr,biometrics]"
 
 COPY alembic.ini ./
