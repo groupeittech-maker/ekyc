@@ -28,6 +28,7 @@ celery_app.conf.update(
         "ekyc.reconcile_stuck_sessions": {"queue": CPU_QUEUE},
         "ekyc.sync_manifest": {"queue": CPU_QUEUE},
         "ekyc.send_heartbeat": {"queue": CPU_QUEUE},
+        "ekyc.refresh_trust_store": {"queue": CPU_QUEUE},
     },
     beat_schedule={
         "retention-purge-nightly": {
@@ -45,6 +46,10 @@ celery_app.conf.update(
         "central-manifest-sync": {
             "task": "ekyc.sync_manifest",
             "schedule": settings.manifest_sync_interval_seconds,
+        },
+        "trust-store-refresh-weekly": {
+            "task": "ekyc.refresh_trust_store",
+            "schedule": 604800.0,  # 7 j — PKD sources update monthly/quarterly
         },
     },
     worker_prefetch_multiplier=1,

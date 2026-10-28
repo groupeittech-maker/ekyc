@@ -338,6 +338,17 @@ def deliver_webhook(self, delivery_id: str) -> str:  # noqa: ANN001 - celery bou
         return "DELIVERED"
 
 
+@celery_app.task(name="ekyc.refresh_trust_store")
+def refresh_trust_store() -> dict:
+    """Weekly CSCA/CRL refresh — pulls configured sources, records
+    provenance. A certificate only becomes trusted through a signed,
+    verified source (never by download alone)."""
+    from scripts.fetch_csca import main as fetch
+
+    rc = fetch([])
+    return {"status": "ok" if rc == 0 else "failed"}
+
+
 @celery_app.task(name="ekyc.sync_manifest")
 def sync_manifest_task() -> dict:
     """Fetch + verify + apply the signed Central manifest (contract §3.4)."""
