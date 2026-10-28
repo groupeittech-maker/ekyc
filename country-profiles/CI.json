@@ -1,0 +1,27 @@
+{
+  "country_code": "CI",
+  "deployment_mode": "national",
+  "environment": "production",
+  "data": {
+    "storage_location": "vps-abidjan",
+    "encryption_at_rest": true,
+    "external_transfer": "deny-by-default"
+  },
+  "identity": {
+    "ocr": true,
+    "mrz": true,
+    "nfc": true,
+    "face_match": true,
+    "liveness": true
+  },
+  "trust": {
+    "tsa_provider": null,
+    "signature_provider": "local",
+    "certificate_profile": "ekyc-signing"
+  },
+  "activation": {
+    "legal_review": false,
+    "hosting_approved": false,
+    "trust_services_validated": false
+  }
+}

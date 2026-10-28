@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     # Optional JSON list of extra LDIF URLs for scripts/fetch_csca
     csca_sources: str = "[]"
 
+    # National-instance gating (Trusdy split: Central ↔ National contract).
+    # Path to the country profile JSON; when set in production, the instance
+    # refuses to boot unless its activation flags carry a valid Ed25519
+    # attestation signed by Trusdy Central (see app/core/country_profile.py).
+    country_profile: str = ""
+    # Central's public key: PEM or 32-byte Ed25519 (hex or base64).
+    central_public_key: str = ""
+
     # Risk engine: overall confidence score (0-100) computed from per-step
     # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
     risk_accept_threshold: float = 80.0
@@ -215,8 +223,15 @@ def validate_production_settings(cfg: Settings | None = None) -> None:
 
     if violations:
         raise InsecureConfigError(
-            "Refusing to start in production — fix configuration:\n  - " + "\n  - ".join(violations)
+            "Refusing to start in production: " + "; ".join(violations)
         )
+
+    # National-instance activation gate — a country profile without a valid
+    # Central attestation refuses to run in production (fail-closed).
+    if cfg.country_profile:
+        from app.core.country_profile import enforce_country_profile
+
+        enforce_country_profile()
 
 
 settings = get_settings()
