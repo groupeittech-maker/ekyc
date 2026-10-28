@@ -44,19 +44,25 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+def _docs_enabled() -> bool:
+    """Swagger/OpenAPI schema is dev tooling — in production it would hand
+    the full API surface (endpoints, payloads, admin hints) to anyone."""
+    return settings.environment != "production"
+
+
 app = FastAPI(
     title="IT-TECH eKYC",
     description="Plateforme de confiance numerique: eKYC, signature electronique, preuve.",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs",
+    docs_url="/docs" if _docs_enabled() else None,
 )
 app.include_router(api_router)
 
 
 @app.get("/", include_in_schema=False)
 def root_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/docs", status_code=302)
+    return RedirectResponse(url="/docs" if _docs_enabled() else "/health", status_code=302)
 
 
 @app.get("/health", tags=["ops"])
