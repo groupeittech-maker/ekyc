@@ -33,17 +33,12 @@ from app.core.config import settings
 def _load_store(csca_dir: Path) -> list[x509.Certificate]:
     certs: list[x509.Certificate] = []
     for pem in sorted(csca_dir.glob("*.pem")):
-        for block in pem.read_text().split("-----END CERTIFICATE-----"):
-            if "BEGIN CERTIFICATE" not in block:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                certs.extend(x509.load_pem_x509_certificates(pem.read_bytes()))
+            except Exception:
                 continue
-            blob = block[block.index("BEGIN CERTIFICATE"):]
-            blob += "-----END CERTIFICATE-----\n"
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                try:
-                    certs.append(x509.load_pem_x509_certificate(blob.encode()))
-                except Exception:
-                    continue
     return certs
 
 
