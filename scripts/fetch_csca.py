@@ -32,6 +32,8 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
@@ -146,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         sources = [(args.file.name, args.file.read_bytes())]
 
     total = 0
+    provenance: list[dict] = []
     with tempfile.TemporaryDirectory() as td:
         for name, blob in sources:
             try:
@@ -169,11 +172,34 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception:
                     continue
             stem = Path(name.split("?")[0]).stem or "csca"
-            (csca_dir / f"{stem}.pem").write_text("".join(_pem(d) for d in valid))
+            pem_file = csca_dir / f"{stem}.pem"
+            pem_file.write_text("".join(_pem(d) for d in valid))
+            fingerprints = [
+                hashlib.sha256(d).hexdigest() for d in valid
+            ]
+            provenance.append(
+                {
+                    "source": name,
+                    "file": pem_file.name,
+                    "certificates": len(valid),
+                    "sha256": fingerprints,
+                }
+            )
             total += len(valid)
             print(f"  + {len(valid):>4} certificates -> {stem}.pem  ({name})")
 
-    print(f"Done — {total} CSCA certificates in {csca_dir}")
+    # Trust-store provenance ledger — a cert only enters the store through a
+    # verified source, and we keep the evidence of where each one came from.
+    (csca_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "sources": provenance,
+            },
+            indent=2,
+        )
+    )
+    print(f"Done — {total} CSCA certificates in {csca_dir} (provenance.json written)")
     return 0 if total else 1
 
 
