@@ -336,3 +336,12 @@ def deliver_webhook(self, delivery_id: str) -> str:  # noqa: ANN001 - celery bou
                 payload={"event": delivery.event, "response_code": delivery.response_code},
             )
         return "DELIVERED"
+
+
+@celery_app.task(name="ekyc.send_heartbeat")
+def send_heartbeat_task() -> dict | None:
+    """Periodic telemetry to Trusdy Central — aggregated counters only,
+    never identities/artifacts. Offline-safe (contract §5 autonomy rule)."""
+    from app.services import heartbeat
+
+    return heartbeat.send_heartbeat()

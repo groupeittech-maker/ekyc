@@ -36,6 +36,10 @@ celery_app.conf.update(
             "task": "ekyc.reconcile_stuck_sessions",
             "schedule": 300.0,  # every 5 min — seuil: EKYC_STUCK_SESSION_MINUTES
         },
+        "central-heartbeat": {
+            "task": "ekyc.send_heartbeat",
+            "schedule": settings.heartbeat_interval_seconds,
+        },
     },
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,

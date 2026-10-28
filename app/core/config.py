@@ -147,6 +147,14 @@ class Settings(BaseSettings):
     # Central's public key: PEM or 32-byte Ed25519 (hex or base64).
     central_public_key: str = ""
 
+    # National → Central heartbeat client (contract v1). Empty = disabled
+    # (autonomy rule: the instance works standalone without a centre).
+    central_url: str = ""
+    instance_id: str = ""
+    # Ed25519 private key of this instance — generated on enrollment.
+    instance_key_path: str = ""
+    heartbeat_interval_seconds: float = 300.0
+
     # Risk engine: overall confidence score (0-100) computed from per-step
     # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
     risk_accept_threshold: float = 80.0
