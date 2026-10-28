@@ -36,9 +36,12 @@ def _load_image(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _face_files(dataset_dir: Path) -> dict[str, list[Path]]:
+def _face_files(dataset_dir: Path, cohort: str | None = None) -> dict[str, list[Path]]:
+    """dataset/<person>/img — or with cohorts: dataset/<cohort>/<person>/img
+    (cohort = capture condition: device model, lighting, camera quality)."""
+    root = dataset_dir / cohort if cohort else dataset_dir
     by_id: dict[str, list[Path]] = {}
-    for person in sorted(dataset_dir.iterdir()):
+    for person in sorted(root.iterdir()):
         if not person.is_dir():
             continue
         images = sorted(
@@ -47,6 +50,16 @@ def _face_files(dataset_dir: Path) -> dict[str, list[Path]]:
         if images:
             by_id[person.name] = images
     return by_id
+
+
+def _cohorts(dataset_dir: Path) -> list[str]:
+    """Cohort directories = first-level dirs whose children are themselves
+    identity dirs. Empty = flat LFW layout (single implicit cohort)."""
+    out = []
+    for d in sorted(dataset_dir.iterdir()):
+        if d.is_dir() and any(c.is_dir() for c in d.iterdir()):
+            out.append(d.name)
+    return out
 
 
 def _build_pairs(
@@ -121,29 +134,61 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--cohorts", action="store_true",
+                        help="dataset/<cohort>/<person>/img — metrics per cohort")
+    parser.add_argument("--far-target", type=float, default=None,
+                        help="exit 2 if any cohort FAR exceeds this")
+    parser.add_argument("--frr-target", type=float, default=None,
+                        help="exit 2 if any cohort FRR exceeds this")
     args = parser.parse_args(argv)
 
     random.seed(args.seed)
-    by_id = _face_files(args.dataset_dir)
-    if len(by_id) < 2:
-        print(
-            f"Need at least 2 identities in {args.dataset_dir}; found {len(by_id)}", file=sys.stderr
-        )
-        return 1
-
-    genuine, impostor = _build_pairs(by_id)
-    if not genuine:
-        print("Need at least one identity with 2+ images to build genuine pairs.", file=sys.stderr)
-        return 1
-
+    cohorts = _cohorts(args.dataset_dir) if args.cohorts else [None]
     provider = InHouseFaceProvider()
-    genuine_scores = [_score_pair(provider, _load_image(a), _load_image(b)) for a, b in genuine]
-    impostor_scores = [_score_pair(provider, _load_image(a), _load_image(b)) for a, b in impostor]
 
-    result = _metrics(genuine_scores, impostor_scores, args.threshold)
-    print(json.dumps(result, indent=2))
+    report: dict = {
+        "model": "SFace",
+        "provider": "inhouse",
+        "threshold": args.threshold,
+        "seed": args.seed,
+        "cohorts": {},
+    }
+    all_genuine: list[float] = []
+    all_impostor: list[float] = []
+    for cohort in cohorts:
+        by_id = _face_files(args.dataset_dir, cohort)
+        if len(by_id) < 2:
+            continue
+        genuine, impostor = _build_pairs(by_id)
+        if not genuine:
+            continue
+        gs = [_score_pair(provider, _load_image(a), _load_image(b)) for a, b in genuine]
+        is_ = [_score_pair(provider, _load_image(a), _load_image(b)) for a, b in impostor]
+        m = _metrics(gs, is_, args.threshold)
+        m["identities"] = len(by_id)
+        report["cohorts"][cohort or "_all"] = m
+        all_genuine += gs
+        all_impostor += is_
+
+    if not all_genuine:
+        print("No usable pairs found — check dataset layout.", file=sys.stderr)
+        return 1
+
+    report["combined"] = _metrics(all_genuine, all_impostor, args.threshold)
+    print(json.dumps(report, indent=2))
     if args.output:
-        args.output.write_text(json.dumps(result, indent=2))
+        args.output.write_text(json.dumps(report, indent=2))
+
+    # Acceptance gates — a threshold only ships if the WORST cohort meets it.
+    fails = []
+    for name, m in report["cohorts"].items():
+        if args.far_target is not None and m["far"] > args.far_target:
+            fails.append(f"{name}: FAR {m['far']} > {args.far_target}")
+        if args.frr_target is not None and m["frr"] > args.frr_target:
+            fails.append(f"{name}: FRR {m['frr']} > {args.frr_target}")
+    if fails:
+        print("ACCEPTANCE FAILED:", *fails, sep="\n  ", file=sys.stderr)
+        return 2
     return 0
 
 

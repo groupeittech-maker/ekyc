@@ -110,6 +110,8 @@ def test_no_crl_is_unchecked_not_revoked(tmp_path, monkeypatch):
     ef, sod, dg1, dg2 = _env(tmp_path, monkeypatch)
     res = _run(ef, sod, dg1, dg2)
     assert res.status == "VALID"
+    assert res.details["signature_valid"] is True
+    assert res.details["revocation_status"] == "UNKNOWN"  # NOT a confirmed non-revocation
     assert res.details["dsc_revocation"] == "NO_CRL"
     assert res.details["revocation_unchecked"] is True
 
@@ -127,8 +129,16 @@ def test_fresh_crl_confirms_not_revoked(tmp_path, monkeypatch):
     ef, sod, dg1, dg2 = _env(tmp_path, monkeypatch, crl="fresh")
     res = _run(ef, sod, dg1, dg2)
     assert res.status == "VALID"
+    assert res.details["revocation_status"] == "NOT_REVOKED"
     assert res.details["dsc_revocation"] == "NOT_REVOKED"
     assert "revocation_unchecked" not in res.details
+
+
+def test_stale_is_unknown_not_confirmed(tmp_path, monkeypatch):
+    """A stale CRL must not confirm non-revocation — status stays UNKNOWN."""
+    ef, sod, dg1, dg2 = _env(tmp_path, monkeypatch, crl="stale")
+    res = _run(ef, sod, dg1, dg2)
+    assert res.details["revocation_status"] == "UNKNOWN"
 
 
 def test_stale_crl_leaves_unknown(tmp_path, monkeypatch):

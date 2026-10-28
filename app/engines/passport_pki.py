@@ -451,6 +451,13 @@ def _check_revocation(
       NOT_REVOKED   — fresh verified CRL does not list the serial
       STALE         — verified CRL exists but nextUpdate has lapsed beyond
                       the grace window: revocation state is unknown
+
+    Note on the grace window (``EKYC_CRL_STALENESS_DAYS``, default 45):
+    it does NOT extend the authority's published validity — it is an ops
+    margin for CRL refresh lag before declaring the revocation state
+    UNKNOWN rather than NOT_REVOKED. Documented policy: a CRL past
+    nextUpdate + grace is stale evidence, usable only for affirmative
+    REVOKED findings, never for confirming non-revocation.
       NO_CRL        — issuer publishes no CRL we hold
       UNVERIFIABLE  — a CRL candidate's signature cannot be verified
     """
@@ -592,11 +599,18 @@ def verify_passport(
         # DG hashes + SOD signature are valid; only the trust anchor is unknown.
         return PkiResult(chain_status, reason, details)
 
-    # Revocation layer — a confirmed revocation invalidates; an absent or
-    # stale CRL is recorded honestly, never treated as proof of revocation
-    # nor silently as proof of non-revocation.
+    # Revocation layer — kept strictly separate from chain validity:
+    #   signature_valid  : chain + SOD + DG hashes proven (above)
+    #   revocation_status: REVOKED | NOT_REVOKED | UNKNOWN
+    # A confirmed revocation invalidates; an absent, stale or unverifiable
+    # CRL is UNKNOWN — neither a revocation nor a confirmed non-revocation.
     rev_status, rev_details = _check_revocation(dsc, csca)  # type: ignore[arg-type]
+    details["signature_valid"] = True
     details["dsc_revocation"] = rev_status
+    details["revocation_status"] = {
+        "REVOKED": "REVOKED",
+        "NOT_REVOKED": "NOT_REVOKED",
+    }.get(rev_status, "UNKNOWN")
     details.update(rev_details)
     if rev_status == "REVOKED":
         return PkiResult("INVALID", "DSC_REVOKED", details)

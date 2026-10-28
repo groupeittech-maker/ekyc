@@ -43,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--threshold", type=float, default=0.6)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--spoof-far-target", type=float, default=None,
+                        help="exit 2 if spoof FAR exceeds this")
+    parser.add_argument("--live-frr-target", type=float, default=None,
+                        help="exit 2 if live FRR exceeds this")
     args = parser.parse_args(argv)
 
     live = _images(args.dataset_dir / "live")
@@ -94,6 +98,15 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2))
         print(f"Saved to {args.output}")
+
+    if args.spoof_far_target is not None and result["spoof_far"] > args.spoof_far_target:
+        print(f"ACCEPTANCE FAILED: spoof_far {result['spoof_far']} > "
+              f"{args.spoof_far_target}", file=sys.stderr)
+        return 2
+    if args.live_frr_target is not None and result["live_frr"] > args.live_frr_target:
+        print(f"ACCEPTANCE FAILED: live_frr {result['live_frr']} > "
+              f"{args.live_frr_target}", file=sys.stderr)
+        return 2
     return 0
 
 
