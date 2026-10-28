@@ -159,7 +159,22 @@ def enforce_country_profile() -> CountryProfile | None:
         raise InsecureConfigError(
             f"Country profile {profile.country_code} has no Central attestation"
         )
-    reason = _verify_attestation(profile.activation_attestation)
+    att = profile.activation_attestation
+    if att.country != profile.country_code:
+        raise InsecureConfigError(
+            f"Attestation country {att.country} does not match profile "
+            f"{profile.country_code} — attestation is non-transferable"
+        )
+    if (
+        att.legal_review != act.legal_review
+        or att.hosting_approved != act.hosting_approved
+        or att.trust_services_validated != act.trust_services_validated
+    ):
+        raise InsecureConfigError(
+            f"Profile {profile.country_code} activation flags do not match "
+            "the signed attestation — file tampered"
+        )
+    reason = _verify_attestation(att)
     if reason is not None:
         raise InsecureConfigError(
             f"Country profile {profile.country_code} attestation rejected: {reason}"

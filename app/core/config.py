@@ -144,6 +144,9 @@ class Settings(BaseSettings):
     # refuses to boot unless its activation flags carry a valid Ed25519
     # attestation signed by Trusdy Central (see app/core/country_profile.py).
     country_profile: str = ""
+    # When true, production MUST run under an attested country profile —
+    # removing EKYC_COUNTRY_PROFILE alone then cannot disarm the gate.
+    require_country_profile: bool = False
     # Central's public key: PEM or 32-byte Ed25519 (hex or base64).
     central_public_key: str = ""
 
@@ -154,6 +157,9 @@ class Settings(BaseSettings):
     # Ed25519 private key of this instance — generated on enrollment.
     instance_key_path: str = ""
     heartbeat_interval_seconds: float = 300.0
+    # Signed-manifest sync (Central → national config overlay).
+    manifest_sync_interval_seconds: float = 300.0
+    overrides_path: str = "./var/overrides.json"
 
     # Risk engine: overall confidence score (0-100) computed from per-step
     # weighted confidences. ACCEPT >= accept, REVIEW >= review, else REJECT.
@@ -236,6 +242,11 @@ def validate_production_settings(cfg: Settings | None = None) -> None:
 
     # National-instance activation gate — a country profile without a valid
     # Central attestation refuses to run in production (fail-closed).
+    if cfg.require_country_profile and not cfg.country_profile:
+        raise InsecureConfigError(
+            "EKYC_COUNTRY_PROFILE is required for this deployment "
+            "(EKYC_REQUIRE_COUNTRY_PROFILE=true)"
+        )
     if cfg.country_profile:
         from app.core.country_profile import enforce_country_profile
 

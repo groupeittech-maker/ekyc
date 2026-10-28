@@ -106,7 +106,7 @@ def test_editing_flags_without_resigning_fails(tmp_path, monkeypatch):
     # over the old payload but flags no longer all true.
     profile["activation_attestation"]["legal_review"] = False
     _cfg(monkeypatch, profile, tmp_path, pubkey=_pub_b64(key))
-    with pytest.raises(InsecureConfigError, match="flags not all true"):
+    with pytest.raises(InsecureConfigError):
         cp.enforce_country_profile()
 
 
@@ -122,6 +122,56 @@ def test_schema_rejects_unknown_fields(tmp_path):
     f.write_text(json.dumps(bad))
     with pytest.raises(Exception):
         cp.load_profile(f)
+
+
+def test_attestation_for_other_country_rejected(tmp_path, monkeypatch):
+    """F1: a signed attestation for country CG must not activate profile CI —
+    attestations are non-transferable."""
+    key = Ed25519PrivateKey.generate()
+    profile = _profile(legal=True, hosting=True, trust=True)
+    profile["activation_attestation"] = _sign_attestation(key, country="CG")
+    _cfg(monkeypatch, profile, tmp_path, pubkey=_pub_b64(key))
+    with pytest.raises(InsecureConfigError, match="non-transferable"):
+        cp.enforce_country_profile()
+
+
+def test_profile_flags_must_match_signed_flags(tmp_path, monkeypatch):
+    """File says 'activated' but the signed attestation says otherwise —
+    tampering with the file flags is caught even with a valid signature."""
+    key = Ed25519PrivateKey.generate()
+    profile = _profile(legal=True, hosting=True, trust=True)
+    att = _sign_attestation(key)
+    att["legal_review"] = False
+    # Re-sign so the signature is VALID over the modified payload — the gate
+    # must still catch the divergence between file flags and signed flags.
+    obj = cp.ActivationAttestation(**att)
+    obj.signature = base64.b64encode(key.sign(obj.canonical_payload())).decode()
+    profile["activation_attestation"] = obj.model_dump(mode="json")
+    _cfg(monkeypatch, profile, tmp_path, pubkey=_pub_b64(key))
+    with pytest.raises(InsecureConfigError, match="tampered"):
+        cp.enforce_country_profile()
+
+
+def test_require_profile_blocks_unset(monkeypatch):
+    """F2: with EKYC_REQUIRE_COUNTRY_PROFILE the gate cannot be disarmed by
+    simply unsetting the profile path."""
+    from app.core.config import validate_production_settings
+
+    cfg = Settings(
+        environment="production",
+        admin_api_key="k" * 40,
+        jwt_secret="s" * 40,
+        kek="a" * 64,
+        ocr_provider="inhouse",
+        face_provider="inhouse",
+        otp_provider="http",
+        otp_http_url="https://gw",
+        signing_dev_self_signed_cert=False,
+        require_country_profile=True,
+        country_profile="",
+    )
+    with pytest.raises(InsecureConfigError, match="EKYC_COUNTRY_PROFILE is required"):
+        validate_production_settings(cfg)
 
 
 def test_production_gate_invoked():

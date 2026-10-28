@@ -52,6 +52,16 @@ class Attestation(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SeenJti(Base):
+    """Anti-replay ledger for instance JWTs — persists across restarts and
+    workers. Rows are purged once the token could no longer be valid."""
+
+    __tablename__ = "seen_jti"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Manifest(Base):
     """Signed software/config distribution for one instance."""
 

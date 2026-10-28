@@ -173,6 +173,36 @@ def test_manifest_signed_and_retrieved(client):
     assert body["signature"]
 
 
+def test_jti_replay_rejected(client):
+    """F3: replaying the same jti is refused — and persists beyond a restart
+    since the ledger lives in the database, not in memory."""
+    instance_id, key, _ = _enroll(client)
+    token = _instance_jwt(key, instance_id)
+    # same jti twice: rebuild identical token
+    import jwt as _jwt
+
+    claims = {"typ": "instance", "sub": instance_id,
+              "iat": int(time.time()), "exp": int(time.time()) + 300,
+              "jti": str(uuid.uuid4())}
+    fixed = _jwt.encode(
+        claims,
+        key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()),
+        algorithm="EdDSA",
+    )
+    r1 = client.post(
+        f"/v1/instances/{instance_id}/heartbeat",
+        headers={"Authorization": f"Bearer {fixed}"},
+        json={"version": "0.1.0"},
+    )
+    r2 = client.post(
+        f"/v1/instances/{instance_id}/heartbeat",
+        headers={"Authorization": f"Bearer {fixed}"},
+        json={"version": "0.1.0"},
+    )
+    assert r1.status_code == 200
+    assert r2.status_code == 401
+
+
 def test_revoke_attestation(client):
     instance_id, _k, _p = _enroll(client)
     client.post(

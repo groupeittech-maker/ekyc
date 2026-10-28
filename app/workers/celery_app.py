@@ -26,6 +26,8 @@ celery_app.conf.update(
         "ekyc.deliver_webhook": {"queue": CPU_QUEUE},
         "ekyc.purge_expired_sessions": {"queue": CPU_QUEUE},
         "ekyc.reconcile_stuck_sessions": {"queue": CPU_QUEUE},
+        "ekyc.sync_manifest": {"queue": CPU_QUEUE},
+        "ekyc.send_heartbeat": {"queue": CPU_QUEUE},
     },
     beat_schedule={
         "retention-purge-nightly": {
@@ -39,6 +41,10 @@ celery_app.conf.update(
         "central-heartbeat": {
             "task": "ekyc.send_heartbeat",
             "schedule": settings.heartbeat_interval_seconds,
+        },
+        "central-manifest-sync": {
+            "task": "ekyc.sync_manifest",
+            "schedule": settings.manifest_sync_interval_seconds,
         },
     },
     worker_prefetch_multiplier=1,

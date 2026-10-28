@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.config import settings
+from app.core import runtime_config as runtime
 from app.engines.policy import FlowPolicy
 from app.models.enums import CheckStatus, SessionStatus, Step
 
@@ -133,9 +134,9 @@ def _compute_risk(
 
 
 def _risk_level(score: float, has_reviews: bool) -> str:
-    if score < settings.risk_review_threshold:
+    if score < runtime.get("risk_review_threshold"):
         return "REJECT"
-    if score < settings.risk_accept_threshold or has_reviews:
+    if score < runtime.get("risk_accept_threshold") or has_reviews:
         return "REVIEW"
     return "ACCEPT"
 
@@ -199,7 +200,7 @@ def decide(
             contributions=contributions,
         )
 
-    if score < settings.risk_review_threshold:
+    if score < runtime.get("risk_review_threshold"):
         return Decision(
             SessionStatus.REJECTED,
             ["LOW_CONFIDENCE"],
@@ -208,7 +209,7 @@ def decide(
             risk_level="REJECT",
             contributions=contributions,
         )
-    if score < settings.risk_accept_threshold:
+    if score < runtime.get("risk_accept_threshold"):
         return Decision(
             SessionStatus.REVIEW,
             ["MEDIUM_CONFIDENCE"],

@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core import runtime_config as runtime
 from app.db.base import utcnow
 from app.engines import audit
 from app.engines.providers import get_ocr_provider
@@ -97,7 +98,7 @@ def _classify(
         if can_retry:
             return CheckStatus.RETRY, "AUTHENTICITY_LOW"
         return CheckStatus.FAILED, "AUTHENTICITY_FAILED"
-    if authenticity.confidence < settings.document_review_threshold:
+    if authenticity.confidence < runtime.get("document_review_threshold"):
         if can_retry:
             return CheckStatus.RETRY, "LOW_CONFIDENCE"
         return CheckStatus.REVIEW, "UNCERTAIN"

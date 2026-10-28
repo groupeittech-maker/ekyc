@@ -338,6 +338,14 @@ def deliver_webhook(self, delivery_id: str) -> str:  # noqa: ANN001 - celery bou
         return "DELIVERED"
 
 
+@celery_app.task(name="ekyc.sync_manifest")
+def sync_manifest_task() -> dict:
+    """Fetch + verify + apply the signed Central manifest (contract §3.4)."""
+    from app.services import manifest
+
+    return manifest.sync_manifest()
+
+
 @celery_app.task(name="ekyc.send_heartbeat")
 def send_heartbeat_task() -> dict | None:
     """Periodic telemetry to Trusdy Central — aggregated counters only,

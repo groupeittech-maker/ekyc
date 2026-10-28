@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core import runtime_config as runtime
 from app.engines import audit, identity
 from app.engines.providers import get_face_provider
 from app.models.biometrics import BiometricCheck
@@ -59,7 +60,7 @@ def process_selfie(db: Session, session: KycSession, selfie: bytes) -> dict[str,
     can_retry = attempts < settings.selfie_max_attempts
 
     liveness = provider.liveness(selfie)
-    if liveness.score >= settings.liveness_threshold:
+    if liveness.score >= runtime.get("liveness_threshold"):
         liveness_status = CheckStatus.PASSED
     else:
         liveness_status = CheckStatus.RETRY if can_retry else CheckStatus.FAILED
@@ -111,7 +112,7 @@ def process_selfie(db: Session, session: KycSession, selfie: bytes) -> dict[str,
         return results
 
     match = provider.match(selfie, document[1])
-    if match.score >= settings.face_match_threshold:
+    if match.score >= runtime.get("face_match_threshold"):
         match_status = CheckStatus.PASSED
     elif match.details.get("reason") in _QUALITY_REASONS and can_retry:
         match_status = CheckStatus.RETRY
