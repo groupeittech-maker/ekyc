@@ -134,6 +134,7 @@ def _extract(blob: bytes, workdir: Path) -> list[bytes]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fetch CSCA master lists")
     parser.add_argument("--url", action="append", default=None, help="Extra source (zip/ml/ldif)")
+    parser.add_argument("--crl", action="append", default=None, help="CRL source URL (.crl/.der)")
     parser.add_argument("--file", type=Path, default=None, help="Local file instead of URL")
     args = parser.parse_args(argv)
 
@@ -199,6 +200,52 @@ def main(argv: list[str] | None = None) -> int:
             indent=2,
         )
     )
+    # CRL sources — downloaded, parsed, and stamped with their issuer/update
+    # times. A CRL is never trusted by download alone: its signature is
+    # verified against the CSCA at *use* time (passport_pki._check_revocation).
+    crl_sources = list(json.loads(getattr(settings, "crl_sources", "[]") or "[]"))
+    crl_sources += args.crl or []
+    if crl_sources:
+        crl_dir = Path(settings.crl_dir or (csca_dir / "crls")).expanduser()
+        crl_dir.mkdir(parents=True, exist_ok=True)
+        crl_prov = []
+        for url in crl_sources:
+            try:
+                blob = _fetch(url)
+                from cryptography import x509
+
+                crl = (
+                    x509.load_pem_x509_crl(blob)
+                    if b"-----BEGIN" in blob
+                    else x509.load_der_x509_crl(blob)
+                )
+                stem = Path(url.split("?")[0]).stem or "crl"
+                out = crl_dir / f"{stem}.crl"
+                out.write_bytes(blob)
+                crl_prov.append(
+                    {
+                        "source": url,
+                        "file": out.name,
+                        "issuer": crl.issuer.rfc4514_string(),
+                        "this_update": crl.this_update_utc.isoformat(),
+                        "next_update": (
+                            crl.next_update_utc.isoformat()
+                            if crl.next_update_utc
+                            else None
+                        ),
+                        "serial_count": len(list(crl)),
+                    }
+                )
+                print(f"  + CRL {out.name}: {crl.issuer.rfc4514_string()}")
+            except Exception as exc:
+                print(f"  ! CRL {url}: {exc}", file=sys.stderr)
+        (crl_dir / "provenance.json").write_text(
+            json.dumps(
+                {"fetched_at": datetime.now(timezone.utc).isoformat(), "crls": crl_prov},
+                indent=2,
+            )
+        )
+
     print(f"Done — {total} CSCA certificates in {csca_dir} (provenance.json written)")
     return 0 if total else 1
 

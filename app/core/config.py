@@ -136,6 +136,12 @@ class Settings(BaseSettings):
     # (PEM or DER) used to chain Document Signer certificates. Empty dir/absent
     # CSCA => NFC verdict INDETERMINATE, never "forged".
     csca_dir: str = "./var/keys/csca"
+    # CRL store (per-issuer revocation lists). Empty → <csca_dir>/crls.
+    # Absence or staleness of a CRL is never treated as revocation proof.
+    crl_dir: str = ""
+    crl_staleness_days: int = 45
+    # JSON list of CRL source URLs (e.g. national PKD endpoints).
+    crl_sources: str = "[]"
     # Optional JSON list of extra LDIF URLs for scripts/fetch_csca
     csca_sources: str = "[]"
 

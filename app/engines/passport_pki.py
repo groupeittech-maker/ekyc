@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -370,16 +371,132 @@ def _load_csca_store() -> list[x509.Certificate]:
     return certs
 
 
-def _chain_to_csca(dsc: x509.Certificate) -> tuple[PkiStatus, str, dict]:
+def _crl_dir() -> Path:
+    if settings.crl_dir:
+        return Path(settings.crl_dir).expanduser()
+    return Path(settings.csca_dir).expanduser() / "crls"
+
+
+def _load_crl_store() -> list[x509.CertificateRevocationList]:
+    """Load every CRL under the crl dir (.crl/.der binary, .pem armored)."""
+    path = _crl_dir()
+    if not path.is_dir():
+        return []
+    crls: list[x509.CertificateRevocationList] = []
+    for file in sorted(path.iterdir()):
+        if file.suffix.lower() not in {".crl", ".der", ".pem"}:
+            continue
+        blob = file.read_bytes()
+        try:
+            if b"-----BEGIN X509 CRL-----" in blob:
+                crls.append(x509.load_pem_x509_crl(blob))
+            else:
+                crls.append(x509.load_der_x509_crl(blob))
+        except Exception:
+            continue
+    return crls
+
+
+def _verify_crl_signature(
+    crl: x509.CertificateRevocationList, csca: x509.Certificate
+) -> bool:
+    """The CRL must be signed by the issuing CSCA — an unverifiable CRL
+    carries no weight either way."""
+    key = csca.public_key()
+    try:
+        if isinstance(key, rsa.RSAPublicKey):
+            key.verify(
+                crl.signature,
+                crl.tbs_certlist_bytes,
+                padding.PKCS1v15(),
+                crl.signature_hash_algorithm,
+            )
+        elif isinstance(key, ec.EllipticCurvePublicKey):
+            key.verify(
+                crl.signature,
+                crl.tbs_certlist_bytes,
+                ec.ECDSA(crl.signature_hash_algorithm),
+            )
+        else:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _aware(dt):
+    from datetime import timezone
+
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _crl_time(crl: x509.CertificateRevocationList, attr: str):
+    """cryptography <42 uses naive last_update/next_update; newer exposes
+    *_utc variants. Normalise to aware datetimes."""
+    aware = getattr(crl, f"{attr}_utc", None)
+    if aware is not None:
+        return aware
+    naive = getattr(crl, attr, None)
+    return _aware(naive) if naive is not None else None
+
+
+def _check_revocation(
+    dsc: x509.Certificate, csca: x509.Certificate
+) -> tuple[str, dict]:
+    """DSC revocation check against CRLs issued by its CSCA.
+
+    Outcomes — absence or staleness is NEVER treated as revocation:
+      REVOKED       — serial listed in a signature-verified CRL (hard evidence,
+                      even from a stale list: revocation is affirmative)
+      NOT_REVOKED   — fresh verified CRL does not list the serial
+      STALE         — verified CRL exists but nextUpdate has lapsed beyond
+                      the grace window: revocation state is unknown
+      NO_CRL        — issuer publishes no CRL we hold
+      UNVERIFIABLE  — a CRL candidate's signature cannot be verified
+    """
+    from app.db.base import utcnow
+
+    now = utcnow()
+    candidates = [
+        c for c in _load_crl_store() if c.issuer.rfc4514_string() == csca.subject.rfc4514_string()
+    ]
+    if not candidates:
+        return "NO_CRL", {}
+    crl = max(candidates, key=lambda c: _crl_time(c, "last_update"))
+    if not _verify_crl_signature(crl, csca):
+        return "UNVERIFIABLE", {"crl_issuer": crl.issuer.rfc4514_string()}
+
+    next_update = _crl_time(crl, "next_update")
+    details = {
+        "crl_issuer": crl.issuer.rfc4514_string(),
+        "crl_this_update": _crl_time(crl, "last_update").isoformat(),
+        "crl_next_update": next_update.isoformat() if next_update else None,
+    }
+    entry = crl.get_revoked_certificate_by_serial_number(dsc.serial_number)
+    if entry is not None:
+        rev_date = getattr(entry, "revocation_date_utc", None) or _aware(entry.revocation_date)
+        details["revocation_date"] = rev_date.isoformat()
+        return "REVOKED", details
+    if next_update is not None:
+        stale_after = next_update + timedelta(days=settings.crl_staleness_days)
+        if now > stale_after:
+            details["stale_since"] = stale_after.isoformat()
+            return "STALE", details
+    return "NOT_REVOKED", details
+
+
+def _chain_to_csca(
+    dsc: x509.Certificate,
+) -> tuple[PkiStatus, str, dict, x509.Certificate | None]:
     from app.db.base import utcnow
 
     now = utcnow()
     details = {"dsc_subject": dsc.subject.rfc4514_string(), "csca_store": settings.csca_dir}
     if now < dsc.not_valid_before_utc or now > dsc.not_valid_after_utc:
-        return "INVALID", "DSC_EXPIRED", details
+        return "INVALID", "DSC_EXPIRED", details, None
     cscas = _load_csca_store()
     if not cscas:
-        return "INDETERMINATE", "CSCA_STORE_EMPTY", details
+        return "INDETERMINATE", "CSCA_STORE_EMPTY", details, None
     for csca in cscas:
         if csca.subject != dsc.issuer:
             continue
@@ -401,12 +518,12 @@ def _chain_to_csca(dsc: x509.Certificate) -> tuple[PkiStatus, str, dict]:
             else:
                 continue
         except InvalidSignature:
-            return "INVALID", "DSC_SIGNATURE_BAD", details
+            return "INVALID", "DSC_SIGNATURE_BAD", details, None
         except Exception:
             continue
         details["csca_subject"] = csca.subject.rfc4514_string()
-        return "VALID", "CHAINED", details
-    return "INDETERMINATE", "CSCA_UNKNOWN", details
+        return "VALID", "CHAINED", details, csca
+    return "INDETERMINATE", "CSCA_UNKNOWN", details, None
 
 
 def verify_passport(
@@ -469,9 +586,20 @@ def verify_passport(
         return PkiResult("INDETERMINATE", "SOD_SIGNATURE_UNVERIFIABLE", details)
 
     dsc = x509.load_der_x509_certificate(sod.signer_cert_der)
-    chain_status, reason, chain_details = _chain_to_csca(dsc)
+    chain_status, reason, chain_details, csca = _chain_to_csca(dsc)
     details.update(chain_details)
     if chain_status != "VALID":
         # DG hashes + SOD signature are valid; only the trust anchor is unknown.
         return PkiResult(chain_status, reason, details)
+
+    # Revocation layer — a confirmed revocation invalidates; an absent or
+    # stale CRL is recorded honestly, never treated as proof of revocation
+    # nor silently as proof of non-revocation.
+    rev_status, rev_details = _check_revocation(dsc, csca)  # type: ignore[arg-type]
+    details["dsc_revocation"] = rev_status
+    details.update(rev_details)
+    if rev_status == "REVOKED":
+        return PkiResult("INVALID", "DSC_REVOKED", details)
+    if rev_status != "NOT_REVOKED":
+        details["revocation_unchecked"] = True
     return PkiResult("VALID", "PASSIVE_AUTH_OK", details)
