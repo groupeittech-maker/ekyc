@@ -236,9 +236,14 @@ def get_manifest(
         )
         if m is None:
             raise HTTPException(404, "no manifest")
+        # SQLite strips tzinfo — the signature was computed over the
+        # timezone-aware ISO string, so re-attach it before returning.
+        nb = m.not_before
+        if nb.tzinfo is None:
+            nb = nb.replace(tzinfo=timezone.utc)
         return {
             "version": m.version,
-            "not_before": m.not_before.isoformat(),
+            "not_before": nb.isoformat(),
             "config_overlay": m.config_overlay,
             "artifacts": m.artifacts,
             "signature": m.signature,
