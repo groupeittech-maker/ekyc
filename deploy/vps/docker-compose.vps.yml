@@ -3,3 +3,24 @@
 services:
   api:
     ports: ["127.0.0.1:8300:8000"]
+
+  # Trusdy Central — control-plane, separate service and data volume.
+  # Its private key lives ONLY here; national instances never see it.
+  central:
+    build: .
+    image: ekyc-api:latest
+    container_name: ekyc-central-1
+    restart: unless-stopped
+    environment:
+      CENTRAL_DATABASE_URL: sqlite:////srv/central/central.db
+      CENTRAL_PRIVATE_KEY_PATH: /srv/central/keys/central_ed25519.pem
+      CENTRAL_BOOTSTRAP_KEY: ${CENTRAL_BOOTSTRAP_KEY:-}
+      CENTRAL_ADMIN_KEY: ${CENTRAL_ADMIN_KEY:-}
+      CENTRAL_ENVIRONMENT: production
+    volumes:
+      - central-data:/srv/central
+    ports: ["127.0.0.1:8400:8000"]
+    command: uvicorn apps.control_plane.app:app --host 0.0.0.0 --port 8000
+
+volumes:
+  central-data:
