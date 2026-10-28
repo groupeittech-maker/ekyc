@@ -67,18 +67,23 @@ def report(csca_dir: Path, expiring_days: int) -> dict:
     countries = []
     for cc in sorted(by_country):
         certs = by_country[cc]
-        expires = min(
+        expiries = sorted(
             c.not_valid_after_utc if hasattr(c, "not_valid_after_utc")
             else c.not_valid_after.replace(tzinfo=timezone.utc)
             for c in certs
         )
+        # A country remains trustable while ANY of its CSCAs is valid —
+        # earliest expiry is shown for renewal tracking only.
+        latest = expiries[-1]
+        usable = latest > now
         countries.append(
             {
                 "country": cc,
                 "csca_count": len(certs),
-                "earliest_expiry": expires.isoformat()[:10],
-                "days_to_expiry": (expires - now).days,
-                "status": "csca-available",
+                "earliest_expiry": expiries[0].isoformat()[:10],
+                "latest_expiry": latest.isoformat()[:10],
+                "days_to_expiry": (latest - now).days,
+                "status": "csca-available" if usable else "all-csca-expired",
             }
         )
     return {
@@ -87,7 +92,11 @@ def report(csca_dir: Path, expiring_days: int) -> dict:
         "total_certificates": sum(len(v) for v in by_country.values()),
         "total_countries": len(countries),
         "countries": countries,
-        "expiring_soon": [c["country"] for c in countries if c["days_to_expiry"] < expiring_days],
+        "expiring_soon": [
+            c["country"]
+            for c in countries
+            if c["days_to_expiry"] < expiring_days
+        ],
         "levels": {
             "L1": "csca-available (this report)",
             "L2": "dsc-chain-verified (measured on NFC reads)",
@@ -112,11 +121,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"CSCA coverage — {r['total_certificates']} certs, "
           f"{r['total_countries']} countries")
-    print(f"{'CC':>4} {'certs':>5} {'expiry':>12} {'days':>6}  status")
+    print(f"{'CC':>4} {'certs':>5} {'latest exp':>12} {'days':>6}  status")
     for c in r["countries"]:
         flag = " !" if c["days_to_expiry"] < args.expiring_days else ""
         print(f"{c['country']:>4} {c['csca_count']:>5} "
-              f"{c['earliest_expiry']:>12} {c['days_to_expiry']:>6}  "
+              f"{c['latest_expiry']:>12} {c['days_to_expiry']:>6}  "
               f"{c['status']}{flag}")
     if r["expiring_soon"]:
         print(f"\n! expiring <{args.expiring_days}d: {', '.join(r['expiring_soon'])}")
