@@ -56,6 +56,7 @@ def test_context_exposes_consent_requirement(client: TestClient, session: dict) 
         "required": True,
         "given": False,
         "policy_version": None,
+        "donate_offered": False,
     }
 
 
