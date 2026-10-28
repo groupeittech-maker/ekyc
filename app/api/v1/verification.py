@@ -134,6 +134,9 @@ def context(session: VerificationSession, db: DbSession) -> SessionContextRespon
             "required": policy.requires_consent,
             "given": bool((session.consent or {}).get("accepted")),
             "policy_version": (session.consent or {}).get("policy_version"),
+            # Pilot phase only: offering the calibration donation checkbox
+            # is a platform-level choice, never implicit.
+            "donate_offered": settings.pilot_donation_offered,
         },
         otp_destination=masked,
         consent_policy_version=settings.consent_policy_version,

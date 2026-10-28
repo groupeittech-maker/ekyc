@@ -143,7 +143,10 @@ class Settings(BaseSettings):
     # JSON list of CRL source URLs (e.g. national PKD endpoints).
     crl_sources: str = "[]"
     # Donated calibration samples (opt-in `donate_samples` at consent).
+    # The donation checkbox is only OFFERED in pilot mode — it never
+    # appears silently on a normal production journey.
     dataset_donation_dir: str = "./var/dataset_donation"
+    pilot_donation_offered: bool = False
     # Optional JSON list of extra LDIF URLs for scripts/fetch_csca
     csca_sources: str = "[]"
 
