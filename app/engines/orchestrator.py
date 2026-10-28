@@ -116,11 +116,28 @@ def resolve(
         raise UnknownJurisdictionError(
             f"Unknown jurisdiction: {code} " f"(configured: {', '.join(sorted(jurisdictions()))})"
         )
+
+    # Client-provided trust services: an activated country profile declares
+    # which connectors this deployment uses (trust.tsa_provider names a
+    # configured TSA — see EKYC_TSAS_JSON; trust.signature_provider names a
+    # Signer). They override the jurisdiction's defaults instance-wide.
+    from app.core.country_profile import active_profile
+
+    profile = active_profile()
+    tsa_policy = (
+        profile.trust.tsa_provider if profile and profile.trust.tsa_provider
+        else rule.get("tsa_policy", "internal")
+    )
+    signature_level = (
+        profile.trust.signature_provider if profile and profile.trust.signature_provider
+        else rule.get("signature_level", "platform")
+    )
+
     return RegulatoryProfile(
         jurisdiction=code,
         vault_profile=rule.get("vault_profile", "default"),
         retention_days=int(rule.get("retention_days", 3650)),
-        tsa_policy=rule.get("tsa_policy", "internal"),
-        signature_level=rule.get("signature_level", "platform"),
+        tsa_policy=tsa_policy,
+        signature_level=signature_level,
         source=source,
     )

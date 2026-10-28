@@ -27,7 +27,11 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from pydantic import BaseModel, Field
 
+import logging
+
 from app.core.config import InsecureConfigError, settings
+
+logger = logging.getLogger(__name__)
 
 
 class DataPolicy(BaseModel, extra="forbid"):
@@ -180,3 +184,22 @@ def enforce_country_profile() -> CountryProfile | None:
             f"Country profile {profile.country_code} attestation rejected: {reason}"
         )
     return profile
+
+
+_active_cache: dict[str, CountryProfile] = {}
+
+
+def active_profile() -> CountryProfile | None:
+    """The currently configured country profile (read at runtime — the same
+    gate applies in production, but a missing profile is allowed when the
+    instance isn't gated). Cached per path to avoid re-parsing per session."""
+    path = settings.country_profile
+    if not path:
+        return None
+    if path not in _active_cache:
+        try:
+            _active_cache[path] = load_profile(path)
+        except Exception:
+            logger.warning("country profile %s unreadable — defaults apply", path)
+            return None
+    return _active_cache[path]
