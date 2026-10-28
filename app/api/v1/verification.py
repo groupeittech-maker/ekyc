@@ -160,6 +160,7 @@ def consent(
             policy_version=payload.policy_version,
             ip=client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            donate_samples=payload.donate_samples,
         )
         db.commit()
         return ConsentResponse(accepted=True, **_step_result(db, session).model_dump())

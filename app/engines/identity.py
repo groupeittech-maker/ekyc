@@ -12,6 +12,7 @@ auto-rejecting a human being on a technicality.
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -142,6 +143,12 @@ def process_document(
     status, reason = _classify(ocr, authenticity, expired, attempts)
     document.status = status
 
+    # LOT E §6.3 — non-personal observation for coverage statistics, and
+    # the opt-in sample donation for the calibration dataset.
+    _record_observation(db, session, document, ocr, status, reason)
+    if (session.consent or {}).get("donate_samples"):
+        _donate_samples(document, images, ocr)
+
     audit.record_event(
         db,
         tenant_id=session.tenant_id,
@@ -181,6 +188,63 @@ def process_document(
     )
     db.flush()
     return document
+
+
+def _record_observation(
+    db: Session, session: KycSession, document: Document, ocr, status, reason: str
+) -> None:
+    """Non-personal stats row — labels and outcomes only, no session, no
+    tenant, no identity values. A row cannot be tied back to a person."""
+    from app.models.document_observation import DocumentObservation
+
+    db.add(
+        DocumentObservation(
+            document_type=document.document_type,
+            mrz_format=ocr.fields.get("mrz_format"),
+            issuing_country=ocr.fields.get("issuing_country"),
+            status=str(status),
+            checks_passed=bool(ocr.fields.get("checks_passed", False)),
+            reason=reason or None,
+            ocr_confidence=ocr.confidence,
+            signals="|".join(str(s) for s in (document.verification or {}).get("signals", []))[:128]
+            or None,
+        )
+    )
+
+
+def _donate_samples(document: Document, images: list[bytes], ocr) -> None:
+    """Export the document images to the calibration dataset — only ever
+    reached when the end-user explicitly opted in at consent.
+
+    Filenames are random UUIDs and the sidecar carries labels only
+    (format/country/type/timestamp) — no session, no tenant, no PII beyond
+    what is printed on the donated document itself."""
+    import json as _json
+    import uuid as _uuid
+
+    from app.core.config import settings
+
+    root = Path(settings.dataset_donation_dir) / (ocr.fields.get("mrz_format") or "unknown")
+    root.mkdir(parents=True, exist_ok=True)
+    sample_id = str(_uuid.uuid4())
+    for index, image in enumerate(images):
+        suffix = {b"\xff\xd8\xff": ".jpg", b"\x89PNG\r\n\x1a\n": ".png"}.get(
+            image[:8][:8], ".bin"
+        )
+        (root / f"{sample_id}-{index}{suffix}").write_bytes(image)
+    (root / f"{sample_id}.json").write_text(
+        _json.dumps(
+            {
+                "kind": "donated-sample",
+                "document_type": document.document_type,
+                "mrz_format": ocr.fields.get("mrz_format"),
+                "issuing_country": ocr.fields.get("issuing_country"),
+                "checks_passed": ocr.fields.get("checks_passed"),
+                "images": len(images),
+            },
+            indent=2,
+        )
+    )
 
 
 def document_image(db: Session, session_id: str) -> tuple[Artifact, bytes] | None:

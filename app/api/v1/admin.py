@@ -101,3 +101,41 @@ def storage_report(db: DbSession) -> dict[str, Any]:
         "vaults": vaults,
         "tenants": sorted(tenant_list, key=lambda t: -t["bytes"]),
     }
+
+
+@router.get("/document-stats")
+def document_stats(db: DbSession) -> dict:
+    """Document-format coverage stats — NON-PERSONAL aggregates only:
+    formats seen, countries, outcomes. Detects unknown formats and
+    recurring errors without ever exposing identity data."""
+    from app.models.document_observation import DocumentObservation
+
+    rows = db.execute(
+        select(
+            DocumentObservation.mrz_format,
+            DocumentObservation.issuing_country,
+            DocumentObservation.status,
+            func.count(),
+        ).group_by(
+            DocumentObservation.mrz_format,
+            DocumentObservation.issuing_country,
+            DocumentObservation.status,
+        )
+    ).all()
+    by_format: dict = {}
+    by_country: dict = {}
+    unknown = 0
+    for mrz_format, country, status_val, count in rows:
+        fmt = mrz_format or "UNKNOWN_FORMAT"
+        if mrz_format is None:
+            unknown += count
+        by_format.setdefault(fmt, {})[status_val] = count
+        by_country.setdefault(country or "??", {}).setdefault(fmt, {})[status_val] = count
+    return {
+        "total_observations": sum(c for *_, c in rows),
+        "unknown_format_observations": unknown,
+        "by_format": by_format,
+        "by_country": by_country,
+        "note": "Aggregated, non-personal — no document numbers, names or "
+        "MRZ text are ever recorded here.",
+    }

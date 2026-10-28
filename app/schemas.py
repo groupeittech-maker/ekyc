@@ -95,6 +95,9 @@ class SessionContextResponse(BaseModel):
 class ConsentRequest(BaseModel):
     accepted: bool
     policy_version: str = "v1"
+    # Opt-in: donate document/selfie samples to the calibration dataset
+    # (testers during the pilot phase). Never defaults to true.
+    donate_samples: bool = False
 
 
 class OtpSendRequest(BaseModel):

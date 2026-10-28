@@ -142,6 +142,8 @@ class Settings(BaseSettings):
     crl_staleness_days: int = 45
     # JSON list of CRL source URLs (e.g. national PKD endpoints).
     crl_sources: str = "[]"
+    # Donated calibration samples (opt-in `donate_samples` at consent).
+    dataset_donation_dir: str = "./var/dataset_donation"
     # Optional JSON list of extra LDIF URLs for scripts/fetch_csca
     csca_sources: str = "[]"
 

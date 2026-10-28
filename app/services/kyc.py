@@ -62,6 +62,7 @@ def grant_consent(
     policy_version: str,
     ip: str | None,
     user_agent: str | None,
+    donate_samples: bool = False,
 ) -> None:
     session.consent = {
         "accepted": True,
@@ -69,6 +70,9 @@ def grant_consent(
         "policy_version": policy_version,
         "ip": ip,
         "user_agent": user_agent,
+        # Separate, explicit donation opt-in for the calibration dataset —
+        # it is never implied by the processing consent itself.
+        "donate_samples": bool(donate_samples),
     }
     session.updated_at = utcnow()
     audit.record_event(
