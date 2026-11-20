@@ -87,7 +87,7 @@
     <button id="consent-submit">J'accepte et je continue</button>
   </section>
 
-  <section id="step-document">
+  <section id="step-document" hidden>
     <h2>Document d'identite</h2>
     <p class="step-desc">Photographiez votre piece d'identite recto (et verso pour les cartes). Bonne lumiere, sans reflets ni doigts.</p>
     <label for="document-type">Type de document</label>
@@ -105,6 +105,7 @@
       <label for="document-verso-file">Verso du document (carte d'identite)</label>
       <input type="file" id="document-verso-file" accept="image/*" capture="environment" />
     </div>
+    <div class="tip" id="document-processing" hidden>Analyse du document en cours, quelques secondes…</div>
     <button id="document-submit">Envoyer le document</button>
   </section>
 
@@ -121,6 +122,7 @@
       <summary>Ou choisir une photo de votre galerie</summary>
       <input type="file" id="selfie-file" accept="image/*" />
     </details>
+    <div class="tip" id="selfie-processing" hidden>Analyse du selfie en cours, quelques secondes…</div>
     <button id="selfie-submit">Envoyer le selfie</button>
   </section>
 
@@ -290,12 +292,44 @@ function refreshVisibility(checks, status) {
   // Le transfert QR n'a de sens que sur un ecran non mobile — sur telephone
   // l'utilisateur est deja au bon endroit.
   $("step-handoff").hidden = captureBlocked || isMobile || (status !== "IN_PROGRESS" && status !== "CREATED");
+
+  // Traitement asynchrone cote worker : tant que le check soumis reste PENDING,
+  // on garde le bouton verrouille et on affiche l'indice de progression.
+  const polling = pollTimer !== null;
+  const docPending = checks.DOCUMENT_VERIFICATION === "PENDING";
+  const selfiePending = checks.LIVENESS === "PENDING" || checks.FACE_MATCH === "PENDING";
+  $("document-processing").hidden = !(polling && docPending);
+  $("selfie-processing").hidden = !(polling && selfiePending);
+  $("document-submit").disabled = polling && docPending;
+  $("selfie-submit").disabled = polling && selfiePending;
   renderProgress(checks);
 }
 
 function update(state) {
   renderChecks(state.checks, state.status);
   refreshVisibility(state.checks, state.status);
+}
+
+// En production, OCR et biometrie tournent sur des workers Celery : le POST
+// renvoie 202 pendant que le verdict est encore PENDING. Sans re-poll le
+// formulaire resterait fige — l'utilisateur croirait le bouton mort.
+let pollTimer = null;
+
+function watchChecks(names) {
+  if (pollTimer) clearInterval(pollTimer);
+  const deadline = Date.now() + 120000;
+  pollTimer = setInterval(async () => {
+    try {
+      const state = await call("/status");
+      update(state);
+      const stillPending = names.some((name) => state.checks[name] === "PENDING");
+      if (!stillPending || TERMINAL[state.status] || Date.now() > deadline) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        update(state);
+      }
+    } catch (_) { /* erreur transitoire : on reessaie au prochain tick */ }
+  }, 2500);
 }
 
 async function bootstrap() {
@@ -324,14 +358,45 @@ function toggleVersoInput() {
 }
 
 // --- Camera capture --------------------------------------------------------
+function cameraError(error) {
+  const name = error && error.name;
+  if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+    return new Error("Acces a la camera refuse. Autorisez-la via l'icone cadenas dans la barre d'adresse, puis reessayez.");
+  }
+  if (name === "NotReadableError" || name === "AbortError" || name === "TrackStartError") {
+    return new Error("Camera occupee : une autre application ou un autre onglet l'utilise. Fermez-les puis reessayez.");
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return new Error("Aucune camera detectee — utilisez le choix de fichier ci-dessous.");
+  }
+  return error;
+}
+
+async function getStream(constraints) {
+  try {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    throw cameraError(error);
+  }
+}
+
 async function openCamera(video, facingMode) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode, width: { ideal: 1280 } },
-    audio: false,
-  });
+  let stream;
+  try {
+    stream = await getStream({ video: { facingMode, width: { ideal: 1280 } }, audio: false });
+  } catch (error) {
+    if (error.name !== "OverconstrainedError") throw error;
+    // Appareil sans camera "user"/"environment" : repli sur la camera par defaut.
+    stream = await getStream({ video: true, audio: false });
+  }
+  video.muted = true;
   video.srcObject = stream;
   await video.play();
   return stream;
+}
+
+function stopStream(stream) {
+  if (stream) stream.getTracks().forEach((track) => track.stop());
 }
 
 function captureFrame(video) {
@@ -349,14 +414,22 @@ bind("selfie-camera", async () => {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Camera indisponible — utilisez le choix de fichier ci-dessous");
   }
+  stopStream(selfieStream);
   $("selfie-video").hidden = false;
   $("selfie-preview").hidden = true;
-  selfieStream = await openCamera($("selfie-video"), "user");
+  try {
+    selfieStream = await openCamera($("selfie-video"), "user");
+  } catch (error) {
+    $("selfie-video").hidden = true;
+    throw error;
+  }
   $("selfie-shoot").hidden = false;
 });
 
 bind("selfie-shoot", async () => {
   capturedSelfie = await captureFrame($("selfie-video"));
+  stopStream(selfieStream);
+  selfieStream = null;
   $("selfie-video").hidden = true;
   $("selfie-shoot").hidden = true;
   $("selfie-preview").src = URL.createObjectURL(capturedSelfie);
@@ -368,14 +441,22 @@ bind("document-camera", async () => {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Camera indisponible — choisissez une photo du document");
   }
+  stopStream(documentStream);
   $("document-video").hidden = false;
   $("document-preview").hidden = true;
-  documentStream = await openCamera($("document-video"), "environment");
+  try {
+    documentStream = await openCamera($("document-video"), "environment");
+  } catch (error) {
+    $("document-video").hidden = true;
+    throw error;
+  }
   $("document-shoot").hidden = false;
 });
 
 bind("document-shoot", async () => {
   capturedDocument = await captureFrame($("document-video"));
+  stopStream(documentStream);
+  documentStream = null;
   $("document-video").hidden = true;
   $("document-shoot").hidden = true;
   $("document-preview").src = URL.createObjectURL(capturedDocument);
@@ -404,7 +485,11 @@ bind("document-submit", async () => {
   form.append("file", capturedDocument || input.files[0]);
   const verso = $("document-verso-file");
   if (verso.files.length) form.append("file_verso", verso.files[0]);
-  return call("/document", { method: "POST", body: form });
+  stopStream(documentStream);
+  documentStream = null;
+  const result = await call("/document", { method: "POST", body: form });
+  watchChecks(["DOCUMENT_VERIFICATION"]);
+  return result;
 });
 
 bind("selfie-submit", async () => {
@@ -412,7 +497,11 @@ bind("selfie-submit", async () => {
   if (!capturedSelfie && !input.files.length) throw new Error("Prenez ou choisissez un selfie d'abord");
   const form = new FormData();
   form.append("file", capturedSelfie || input.files[0], "selfie.jpg");
-  return call("/selfie", { method: "POST", body: form });
+  stopStream(selfieStream);
+  selfieStream = null;
+  const result = await call("/selfie", { method: "POST", body: form });
+  watchChecks(["LIVENESS", "FACE_MATCH"]);
+  return result;
 });
 
 bind("handoff-create", async () => {
@@ -457,6 +546,11 @@ function bind(id, handler) {
 }
 
 $("document-type").addEventListener("change", toggleVersoInput);
+
+window.addEventListener("pagehide", () => {
+  stopStream(selfieStream);
+  stopStream(documentStream);
+});
 
 bootstrap().catch((error) => showError(error.message));
 </script>
