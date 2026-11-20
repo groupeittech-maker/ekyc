@@ -19,17 +19,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "documents",
-        sa.Column("verso_artifact_id", sa.String(64), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_documents_verso_artifact",
-        "documents",
-        "artifacts",
-        ["verso_artifact_id"],
-        ["id"],
-    )
+    # Batch mode: SQLite has no ALTER ADD/DROP CONSTRAINT — the table is
+    # rebuilt (copy-and-move). On other dialects this is a plain ALTER.
+    with op.batch_alter_table("documents") as batch_op:
+        batch_op.add_column(sa.Column("verso_artifact_id", sa.String(64), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_documents_verso_artifact",
+            "artifacts",
+            ["verso_artifact_id"],
+            ["id"],
+        )
     op.add_column(
         "kyc_sessions", sa.Column("transfer_code_hash", sa.String(128), nullable=True)
     )
@@ -42,5 +41,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("kyc_sessions", "transfer_expires_at")
     op.drop_column("kyc_sessions", "transfer_code_hash")
-    op.drop_constraint("fk_documents_verso_artifact", "documents", type_="foreignkey")
-    op.drop_column("documents", "verso_artifact_id")
+    with op.batch_alter_table("documents") as batch_op:
+        batch_op.drop_constraint("fk_documents_verso_artifact", type_="foreignkey")
+        batch_op.drop_column("verso_artifact_id")
