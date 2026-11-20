@@ -30,7 +30,7 @@ def send_ctx(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> dict:
     """Session with consent given, ready for OTP; sender captured."""
     monkeypatch.setattr(settings, "otp_send_cooldown_seconds", 0)
     sender = CapturingOtpSender()
-    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda: sender)
+    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda *a, **k: sender)
     creds = client.post(
         "/v1/admin/tenants",
         headers=_ADMIN,
@@ -220,7 +220,7 @@ def test_gateway_down_returns_503_without_challenge(
         def send(self, channel: str, destination: str, code: str) -> None:
             raise ConnectionError("gateway down")
 
-    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda: DownSender())
+    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda *a, **k: DownSender())
     sid, vh = send_ctx["make_session"]()
     resp = _send(client, sid, vh)
     assert resp.status_code == 503

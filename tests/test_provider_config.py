@@ -90,6 +90,7 @@ def test_configured_provider_names_are_exposed() -> None:
     assert names["ocr"] == ["inhouse", "stub", "tesseract"]
     assert names["face"] == ["inhouse", "stub"]
     assert names["otp"] == ["http", "log", "oauth-sms"]
+    assert names["otp_email"] == ["smtp"]
 
 
 # --------------------------------------------------------------------------- #
@@ -219,3 +220,56 @@ def test_destination_digits_strips_plus(
     _fake_httpx(calls, monkeypatch)
     providers.get_otp_sender().send("SMS", "+22507123456", "482913")
     assert calls[0]["json"]["recipient"] == "22507123456"
+
+
+# --------------------------------------------------------------------------- #
+# SMTP e-mail sender (EMAIL channel)
+# --------------------------------------------------------------------------- #
+def _smtp_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "otp_email_provider", "smtp")
+    monkeypatch.setattr(settings, "smtp_host", "smtp.test")
+    monkeypatch.setattr(settings, "smtp_port", 465)
+    monkeypatch.setattr(settings, "smtp_security", "ssl")
+    monkeypatch.setattr(settings, "smtp_user", "ekyc@test.dev")
+    monkeypatch.setattr(settings, "smtp_password", "secret")
+    monkeypatch.setattr(settings, "smtp_from_email", "noreply@test.dev")
+
+
+def test_email_channel_uses_the_email_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: dict = {}
+
+    class _Smtp:
+        def __init__(self, host, port, timeout):
+            sent["connect"] = (host, port)
+
+        def login(self, user, password):
+            sent["login"] = user
+
+        def send_message(self, msg):
+            sent["to"] = msg["To"]
+            sent["subject"] = msg["Subject"]
+            sent["body"] = msg.get_content()
+
+        def quit(self):
+            pass
+
+    _smtp_env(monkeypatch)
+    monkeypatch.setattr("smtplib.SMTP_SSL", _Smtp)
+    providers.get_otp_sender(channel="EMAIL").send("EMAIL", "user@mail.dev", "123456")
+
+    assert sent["connect"] == ("smtp.test", 465)
+    assert sent["to"] == "user@mail.dev"
+    assert "123456" in sent["body"]
+
+
+def test_email_channel_without_provider_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="OTP_EMAIL_PROVIDER"):
+        providers.get_otp_sender(channel="EMAIL")
+
+
+def test_smtp_sender_requires_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.engines.providers.otp_senders import SmtpOtpSender
+
+    monkeypatch.setattr(settings, "smtp_host", "")
+    with pytest.raises(RuntimeError, match="SMTP_HOST"):
+        SmtpOtpSender()

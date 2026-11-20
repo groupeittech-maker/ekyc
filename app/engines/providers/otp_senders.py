@@ -152,3 +152,47 @@ class OAuthSmsOtpSender(OtpSender):
         )
         response.raise_for_status()
         _raise_on_gateway_error(response)
+
+
+class SmtpOtpSender(OtpSender):
+    """E-mail delivery for the OTP code (stdlib smtplib — no extra dep).
+
+    Selected via ``EKYC_OTP_EMAIL_PROVIDER=smtp``; only registered for the
+    EMAIL channel so a plain SMS ``EKYC_OTP_PROVIDER`` never receives an
+    e-mail-shaped destination.
+    """
+
+    name = "smtp"
+
+    def __init__(self) -> None:
+        for field in ("smtp_host", "smtp_user", "smtp_password", "smtp_from_email"):
+            if not getattr(settings, field):
+                raise RuntimeError(f"smtp sender requires EKYC_{field.upper()}")
+
+    def send(self, channel: str, destination: str, code: str) -> None:
+        import smtplib
+        from email.message import EmailMessage
+
+        msg = EmailMessage()
+        msg["Subject"] = settings.otp_email_subject
+        msg["From"] = (
+            f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
+            if settings.smtp_from_name
+            else settings.smtp_from_email
+        )
+        msg["To"] = destination
+        msg.set_content(settings.otp_message_template.format(code=code))
+
+        host, port = settings.smtp_host, settings.smtp_port
+        security = settings.smtp_security.lower()
+        if security == "ssl":
+            client: smtplib.SMTP = smtplib.SMTP_SSL(host, port, timeout=15)
+        else:
+            client = smtplib.SMTP(host, port, timeout=15)
+        try:
+            if security == "starttls":
+                client.starttls()
+            client.login(settings.smtp_user, settings.smtp_password)
+            client.send_message(msg)
+        finally:
+            client.quit()

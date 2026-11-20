@@ -123,10 +123,22 @@ _FACE_REGISTRY: dict[str, Callable[[], FaceProvider]] = {
     "stub": StubFaceProvider,
     "inhouse": _inhouse_face,
 }
+def _smtp_otp() -> OtpSender:
+    from app.engines.providers.otp_senders import SmtpOtpSender
+
+    try:
+        return SmtpOtpSender()
+    except RuntimeError as exc:
+        raise ProviderDependencyError(str(exc)) from exc
+
+
 _OTP_REGISTRY: dict[str, Callable[[], OtpSender]] = {
     "log": _log_otp,
     "http": _http_otp,
     "oauth-sms": _oauth_sms_otp,
+}
+_EMAIL_OTP_REGISTRY: dict[str, Callable[[], OtpSender]] = {
+    "smtp": _smtp_otp,
 }
 
 
@@ -141,7 +153,17 @@ def get_face_provider() -> FaceProvider:
 
 
 @lru_cache
-def get_otp_sender() -> OtpSender:
+def get_otp_sender(channel: str | None = None) -> OtpSender:
+    """Sender for a delivery channel — EMAIL uses its own provider: the SMS
+    gateway cannot deliver e-mail, so an EMAIL send without
+    ``EKYC_OTP_EMAIL_PROVIDER`` is refused instead of being posted to the
+    SMS endpoint with a malformed destination."""
+    if channel == "EMAIL":
+        if settings.otp_email_provider:
+            return _resolve(settings.otp_email_provider, _EMAIL_OTP_REGISTRY, "OTP email")
+        raise ProviderDependencyError(
+            "EMAIL OTP requires EKYC_OTP_EMAIL_PROVIDER (e.g. 'smtp' + EKYC_SMTP_*)"
+        )
     return _resolve(settings.otp_provider, _OTP_REGISTRY, "OTP")
 
 
@@ -151,4 +173,5 @@ def configured_providers() -> dict[str, list[str]]:
         "ocr": sorted(_OCR_REGISTRY),
         "face": sorted(_FACE_REGISTRY),
         "otp": sorted(_OTP_REGISTRY),
+        "otp_email": sorted(_EMAIL_OTP_REGISTRY),
     }

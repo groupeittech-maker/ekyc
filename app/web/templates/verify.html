@@ -131,7 +131,7 @@
     <p class="step-desc" id="otp-desc">Un code vous sera envoye par SMS ou email pour confirmer votre identite.</p>
     <label for="otp-destination">Numero de telephone ou email</label>
     <input type="text" id="otp-destination" placeholder="+242 06 000 00 00" />
-    <div class="tip" id="otp-bound" hidden>Le code sera envoye au numero declare par votre operateur.</div>
+    <div class="tip" id="otp-bound" hidden>Le code sera envoye au contact declare par votre operateur.</div>
     <button id="otp-send">Recevoir le code</button>
     <label for="otp-code">Code recu</label>
     <input type="text" id="otp-code" inputmode="numeric" autocomplete="one-time-code" />
@@ -347,6 +347,9 @@ async function bootstrap() {
     $("otp-destination").value = context.otp_destination;
     $("otp-destination").readOnly = true;
     $("otp-bound").hidden = false;
+    if (context.otp_destination.includes("@")) {
+      $("otp-bound").textContent = "Le code sera envoye a l'adresse email declaree par votre operateur.";
+    }
   }
   update(context);
   toggleVersoInput();
@@ -514,11 +517,24 @@ bind("handoff-create", async () => {
 });
 
 bind("otp-send", async () => {
-  await call("/otp/send", {
+  // A bound destination stays server-side: sending back the masked echo
+  // (jm****@yahoo.fr) or a client-chosen channel can only break the binding.
+  const body = $("otp-destination").readOnly
+    ? {}
+    : {
+        channel: $("otp-destination").value.includes("@") ? "EMAIL" : "SMS",
+        destination: $("otp-destination").value,
+      };
+  const result = await call("/otp/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ channel: $("otp-destination").value.includes("@") ? "EMAIL" : "SMS", destination: $("otp-destination").value }),
+    body: JSON.stringify(body),
   });
+  const tip = $("otp-bound");
+  tip.hidden = false;
+  tip.textContent = result.channel === "EMAIL"
+    ? `Code envoye a ${result.destination} — verifiez vos emails et le dossier spam.`
+    : `Code envoye par SMS au ${result.destination}.`;
   return call("/status");
 });
 

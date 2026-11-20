@@ -102,7 +102,10 @@ class ConsentRequest(BaseModel):
 
 class OtpSendRequest(BaseModel):
     channel: OtpChannel = OtpChannel.SMS
-    destination: str
+    # Optional when the tenant bound a destination at session creation: the
+    # endpoint then uses the declared destination (and derives the channel
+    # from it). May also echo the masked form shown in the verify UI.
+    destination: str | None = None
 
 
 class OtpSendResponse(BaseModel):

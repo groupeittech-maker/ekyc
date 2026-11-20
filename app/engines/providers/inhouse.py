@@ -108,12 +108,34 @@ class _CvEngine:
             raise ValueError("Unreadable image payload")
         return image
 
+    # YuNet reliably finds faces that fill most of the frame only below this
+    # long-side size — a phone front camera selfie (1280+) with a close face
+    # otherwise returns zero detections and the capture is wrongly rejected.
+    _DETECT_LONG_SIDE = 640
+
     def detect_faces(self, image):
         h, w = image.shape[:2]
         detector = self.detector()
-        detector.setInputSize((w, h))
-        _, faces = detector.detect(image)
-        return faces if faces is not None else []
+        long_side = max(h, w)
+        probes = [self._DETECT_LONG_SIDE / long_side] if long_side > self._DETECT_LONG_SIDE else []
+        probes.append(1.0)  # native last: keeps small faces in large frames
+        for scale in probes:
+            frame = (
+                image
+                if scale == 1.0
+                else self.cv2.resize(image, None, fx=scale, fy=scale)
+            )
+            fh, fw = frame.shape[:2]
+            detector.setInputSize((fw, fh))
+            _, faces = detector.detect(frame)
+            if faces is None or len(faces) == 0:
+                continue
+            if scale != 1.0:
+                # Columns 0..13 are box + landmark coordinates (col 14 is the score).
+                faces = faces.copy()
+                faces[:, :14] /= scale
+            return list(faces)
+        return []
 
     def largest_face(self, image, faces):
         best = None

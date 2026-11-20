@@ -73,6 +73,18 @@ class Settings(BaseSettings):
     # (e.g. 1smsafrica: {"status": "error"}). Empty field disables the check.
     otp_http_error_field: str = "status"
     otp_http_error_value: str = "error"
+    # EMAIL channel delivery — separate provider because SMS gateways cannot
+    # send e-mail. Empty = EMAIL sends are refused (503), never routed to the
+    # SMS gateway with a malformed destination.
+    otp_email_provider: str = ""  # smtp
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_security: str = "ssl"  # ssl | starttls | none
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Trusdy"
+    otp_email_subject: str = "Votre code de verification"
     otp_length: int = 6
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5

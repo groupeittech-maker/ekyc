@@ -99,7 +99,7 @@ def send_otp(
 
     code = _generate_code()
     try:
-        get_otp_sender().send(str(channel), destination, code)
+        get_otp_sender(channel=str(channel)).send(str(channel), destination, code)
     except OtpError:
         raise
     except Exception as exc:

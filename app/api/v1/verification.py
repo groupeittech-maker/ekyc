@@ -28,7 +28,7 @@ from app.engines import otp as otp_engine
 from app.engines import passport_pki
 from app.engines.audit import record_event
 from app.models.document import Document
-from app.models.enums import ArtifactKind, AuditEventType, CheckStatus, DocumentType, Step
+from app.models.enums import ArtifactKind, AuditEventType, CheckStatus, DocumentType, OtpChannel, Step
 from app.models.session import KycSession
 from app.models.tenant import Tenant
 from app.schemas import (
@@ -478,13 +478,31 @@ def send_otp(
     if not kyc.policy_of(session).requires(Step.OTP):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP is not part of this flow")
     declared = (session.metadata_ or {}).get("otp_destination")
-    if declared and _norm_destination(str(declared)) != _norm_destination(payload.destination):
-        # The tenant declared the destination at session creation — the end
-        # user cannot substitute another number (OTP then means "controls the
-        # declared phone", not "controls some phone").
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP_DESTINATION_MISMATCH")
+    if declared:
+        declared_norm = _norm_destination(str(declared))
+        provided = (payload.destination or "").strip()
+        if provided and _norm_destination(provided) not in {
+            declared_norm,
+            # The verify UI echoes back the *masked* destination it was shown —
+            # that is the same destination, not a substitution.
+            _norm_destination(otp_engine.mask_destination(declared_norm)),
+        }:
+            # The tenant declared the destination at session creation — the
+            # end user cannot substitute another one (OTP then means
+            # "controls the declared contact", not "controls some contact").
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP_DESTINATION_MISMATCH")
+        # Always deliver to the tenant-declared destination; the channel is
+        # derived from it, not from the client (an e-mail destination goes to
+        # the e-mail sender, a phone number to SMS).
+        destination = declared_norm
+        channel = OtpChannel.EMAIL if "@" in declared_norm else OtpChannel.SMS
+    else:
+        if not (payload.destination or "").strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP_DESTINATION_REQUIRED")
+        destination = payload.destination
+        channel = payload.channel
     try:
-        challenge = otp_engine.send_otp(db, session, payload.channel, payload.destination)
+        challenge = otp_engine.send_otp(db, session, channel, destination)
     except otp_engine.OtpRateLimited as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "OTP_RATE_LIMITED") from exc
     except otp_engine.OtpDeliveryError as exc:

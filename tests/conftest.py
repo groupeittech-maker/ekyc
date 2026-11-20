@@ -93,7 +93,7 @@ class CapturingOtpSender(OtpSender):
 @pytest.fixture
 def otp_sender(monkeypatch: pytest.MonkeyPatch) -> CapturingOtpSender:
     sender = CapturingOtpSender()
-    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda: sender)
+    monkeypatch.setattr("app.engines.providers.get_otp_sender", lambda *a, **k: sender)
     return sender
 
 

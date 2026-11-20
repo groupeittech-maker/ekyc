@@ -207,8 +207,12 @@ def test_viz_crosscheck_flags_missing_printed_name() -> None:
 # OTP destination declared by the tenant
 # --------------------------------------------------------------------------- #
 def test_otp_destination_is_bound_to_the_tenant_declared_number(
-    client: TestClient, tenant_token: str, otp_sender: CapturingOtpSender
+    client: TestClient,
+    tenant_token: str,
+    otp_sender: CapturingOtpSender,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(settings, "otp_send_cooldown_seconds", 0)
     response = client.post(
         "/v1/kyc/sessions",
         headers={"Authorization": f"Bearer {tenant_token}"},
@@ -241,6 +245,55 @@ def test_otp_destination_is_bound_to_the_tenant_declared_number(
         json={"channel": "SMS", "destination": "+2250707070707"},
     )
     assert sent.status_code == 200
+
+    # The verify UI echoes back the masked destination it was shown — same
+    # destination, not a substitution.
+    masked = client.post(
+        f"{base}/otp/send",
+        headers=headers,
+        json={"channel": "SMS", "destination": "*********0707"},
+    )
+    assert masked.status_code == 200
+
+    # No destination at all: the declared one is used.
+    empty = client.post(f"{base}/otp/send", headers=headers, json={})
+    assert empty.status_code == 200
+    assert empty.json()["destination"] == "*********0707"
+
+
+def test_otp_declared_email_routes_to_the_email_channel(
+    client: TestClient, tenant_token: str, otp_sender: CapturingOtpSender
+) -> None:
+    response = client.post(
+        "/v1/kyc/sessions",
+        headers={"Authorization": f"Bearer {tenant_token}"},
+        json={
+            "flow": "TRAVEL_INSURANCE",
+            "customer_reference": "MHC-2",
+            "otp_destination": "jmartin@yahoo.fr",
+        },
+    )
+    session = response.json()
+    headers = session_headers(session["verification_url"])
+    base = f"/v1/verification/{session['session_id']}"
+    give_consent(client, headers, base)
+
+    context = client.get(f"{base}/context", headers=headers).json()
+    masked = context["otp_destination"]
+    assert masked.endswith("@yahoo.fr")
+    assert masked.startswith("jm")
+
+    # The masked echo shown in the UI is accepted and the channel is derived
+    # from the declared destination — not trusted from the client.
+    sent = client.post(
+        f"{base}/otp/send",
+        headers=headers,
+        json={"channel": "SMS", "destination": masked},
+    )
+    assert sent.status_code == 200
+    body = sent.json()
+    assert body["channel"] == "EMAIL"
+    assert body["destination"] == masked
 
 
 # --------------------------------------------------------------------------- #
