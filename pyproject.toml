@@ -12,6 +12,7 @@ dependencies = [
     "alembic==1.13.3",
     "psycopg2-binary==2.9.10",
     "celery==5.4.0",
+    "kombu>=5.4.0,<5.7.0",
     "redis==5.0.8",
     "httpx==0.27.2",
     "PyJWT==2.9.0",
