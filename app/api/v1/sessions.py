@@ -15,14 +15,17 @@ from app.engines.policy import UnknownFlowError
 from app.engines.signature_manager import UnknownSignerError
 from app.engines.tsa import UnknownTsaProviderError
 from app.models.document import Artifact
+from app.models.enums import AuditEventType
 from app.models.session import KycSession
 from app.models.signature import SignedDocument
 from app.schemas import (
     AuditEventResponse,
     AuditExportResponse,
     ContractRequest,
+    EvidenceArtifactResponse,
     SessionCreateRequest,
     SessionCreateResponse,
+    SessionEvidenceResponse,
     SessionResultResponse,
     SignedDocumentResponse,
 )
@@ -49,6 +52,7 @@ def create_session(
             metadata={
                 **payload.metadata,
                 **({"otp_destination": payload.otp_destination} if payload.otp_destination else {}),
+                **({"return_url": payload.return_url} if payload.return_url else {}),
             },
             jurisdiction=payload.jurisdiction,
             ip=client_ip(request),
@@ -108,6 +112,74 @@ def export_audit(session: TenantSession, db: DbSession) -> AuditExportResponse:
 
 
 CERTIFICATE_REFERENCE = "KYC_CERTIFICATE"
+
+
+@router.get("/{session_id}/evidence", response_model=SessionEvidenceResponse)
+def session_evidence(session: TenantSession, db: DbSession) -> SessionEvidenceResponse:
+    """Evidence bundle for the tenant's manual review: what the user
+    submitted (artifacts), how each check scored, and the decision reasons.
+    Access is audit-logged — the reviewer becomes an actor in the chain."""
+    result = kyc.public_result(session)
+    artifacts = db.scalars(
+        select(Artifact)
+        .where(Artifact.session_id == session.id)
+        .order_by(Artifact.created_at)
+    ).all()
+    audit.record_event(
+        db,
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        event_type=AuditEventType.EVIDENCE_ACCESSED,
+        payload={"artifacts": len(artifacts)},
+    )
+    db.commit()
+    return SessionEvidenceResponse(
+        session_id=session.id,
+        customer_reference=session.customer_reference,
+        status=str(session.status),
+        checks=session.checks,
+        check_details=kyc.check_details(session),
+        reasons=session.reasons or [],
+        identity=result["identity"],
+        risk_score=result["risk_score"],
+        artifacts=[
+            EvidenceArtifactResponse(
+                artifact_id=a.id,
+                kind=a.kind,
+                content_type=a.content_type,
+                size_bytes=a.size_bytes,
+                sha256=a.sha256,
+                created_at=a.created_at,
+                purged=a.purged_at is not None,
+            )
+            for a in artifacts
+        ],
+    )
+
+
+@router.get("/{session_id}/artifacts/{artifact_id}")
+def session_artifact(
+    session: TenantSession, artifact_id: str, db: DbSession
+) -> Response:
+    """Download one evidence artifact (document image, selfie…). Tenant-
+    scoped: the artifact must belong to this session."""
+    artifact = db.get(Artifact, artifact_id)
+    if (
+        artifact is None
+        or artifact.session_id != session.id
+        or artifact.tenant_id != session.tenant_id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
+    if artifact.purged_at:
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Retention period elapsed — the blob was purged, "
+            "the registry entry remains for audit.",
+        )
+    return Response(
+        content=read_artifact(artifact),
+        media_type=artifact.content_type,
+    )
 
 
 @router.get("/{session_id}/certificate")

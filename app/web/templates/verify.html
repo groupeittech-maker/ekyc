@@ -54,6 +54,7 @@
     .error { color: var(--ko); font-size: 14px; min-height: 20px; font-weight: 500; }
     .retry-hint { background: #fff4e5; color: #8a5300; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
     .tip { background: #eafaf6; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #0d6b5c; margin-bottom: 12px; }
+    .return-link { display: block; width: 100%; padding: 13px; font-size: 16px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 700; text-align: center; text-decoration: none; min-height: 50px; box-sizing: border-box; margin-bottom: 12px; }
     footer { text-align: center; margin-top: 26px; }
     footer img, footer .mark { color: var(--muted); font-size: 12px; }
   </style>
@@ -149,6 +150,7 @@
   <section id="final" hidden>
     <h2>Verification terminee</h2>
     <p id="final-message" class="step-desc"></p>
+    <a id="return-link" class="return-link" hidden>Retour a l'application</a>
   </section>
 
   <section id="status-card">
@@ -202,6 +204,7 @@ let steps = [];
 let consentRequired = false;
 let consentGiven = false;
 let consentPolicyVersion = "v1";
+let returnUrl = null;
 let capturedSelfie = null;
 let capturedDocument = null;
 
@@ -279,6 +282,10 @@ function refreshVisibility(checks, status) {
   $("final").hidden = !finalMessage;
   if (finalMessage) {
     $("final-message").textContent = finalMessage;
+    if (returnUrl) {
+      $("return-link").href = returnUrl;
+      $("return-link").hidden = false;
+    }
     for (const step of ["step-consent", "step-document", "step-selfie", "step-otp", "step-handoff"]) $(step).hidden = true;
     $("progress").hidden = true;
     return;
@@ -338,6 +345,7 @@ async function bootstrap() {
   steps = context.steps;
   consentRequired = !!(context.consent && context.consent.required);
   consentGiven = !!(context.consent && context.consent.given);
+  returnUrl = context.return_url || null;
   consentPolicyVersion = context.consent_policy_version || "v1";
   $("donate-row").hidden = !(context.consent && context.consent.donate_offered);
   $("flow-label").textContent = context.flow_label;

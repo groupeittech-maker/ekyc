@@ -438,6 +438,28 @@ def expire(db: Session, session: KycSession) -> None:
     queue_session_event(db, session)
 
 
+# Per-check fields safe to expose to the tenant for manual review —
+# engine internals (antispoof features, gateway responses) stay server-side.
+_CHECK_DETAIL_KEYS = {
+    "score", "provider", "reason", "attempts", "skipped", "status",
+    "ocr_confidence", "authentic",
+}
+
+
+def check_details(session: KycSession) -> dict[str, Any]:
+    """Filtered per-step diagnostics (score, provider, reason) for review."""
+    details: dict[str, Any] = {}
+    for step, data in (session.internal or {}).items():
+        if not isinstance(data, dict):
+            continue
+        details[step] = {
+            key: value
+            for key, value in data.items()
+            if key in _CHECK_DETAIL_KEYS and isinstance(value, (str, int, float, bool))
+        }
+    return details
+
+
 def public_result(session: KycSession, *, include_identity: bool = True) -> dict[str, Any]:
     """Data minimisation: tenants only get what they need to decide."""
     identity_fields = ("first_name", "last_name", "date_of_birth", "nationality", "document_type")
@@ -448,6 +470,7 @@ def public_result(session: KycSession, *, include_identity: bool = True) -> dict
         "jurisdiction": session.jurisdiction,
         "status": session.status,
         "checks": session.checks,
+        "check_details": check_details(session),
         "reasons": session.reasons,
         "created_at": session.created_at,
         "completed_at": session.completed_at,

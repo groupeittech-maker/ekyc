@@ -140,6 +140,7 @@ def context(session: VerificationSession, db: DbSession) -> SessionContextRespon
         },
         otp_destination=masked,
         consent_policy_version=settings.consent_policy_version,
+        return_url=(session.metadata_ or {}).get("return_url"),
         expires_at=session.expires_at,
     )
 

@@ -488,3 +488,74 @@ def test_nfc_unknown_csca_is_indeterminate_not_forged(
     # Other steps are still pending — the session stays open, but once they
     # complete the indeterminate chip puts the dossier in REVIEW, never REJECT.
     assert body["status"] == "IN_PROGRESS"
+
+
+# --------------------------------------------------------------------------- #
+# Tenant return_url + evidence bundle
+# --------------------------------------------------------------------------- #
+def test_return_url_is_exposed_in_context_and_evidence_lists_artifacts(
+    client: TestClient, tenant_token: str, otp_sender: CapturingOtpSender
+) -> None:
+    response = client.post(
+        "/v1/kyc/sessions",
+        headers={"Authorization": f"Bearer {tenant_token}"},
+        json={
+            "flow": "TRAVEL_INSURANCE",
+            "customer_reference": "MHC-3",
+            "otp_destination": "jmartin@yahoo.fr",
+            "return_url": "https://mymhc.example/ekyc-return.html",
+        },
+    )
+    session = response.json()
+    headers = session_headers(session["verification_url"])
+    base = f"/v1/verification/{session['session_id']}"
+    give_consent(client, headers, base)
+
+    context = client.get(f"{base}/context", headers=headers).json()
+    assert context["return_url"] == "https://mymhc.example/ekyc-return.html"
+
+    # The tenant fetches the evidence bundle for its own review.
+    bearer = {"Authorization": f"Bearer {tenant_token}"}
+    evidence = client.get(
+        f"/v1/kyc/sessions/{session['session_id']}/evidence", headers=bearer
+    )
+    assert evidence.status_code == 200
+    body = evidence.json()
+    assert body["session_id"] == session["session_id"]
+    assert "artifacts" in body and "check_details" in body
+
+    # A document upload lands in the artifact list and is downloadable.
+    client.post(
+        f"{base}/document",
+        headers=headers,
+        files={"file": ("passport.txt", PASSPORT_MRZ.encode(), "text/plain")},
+        data={"document_type": "PASSPORT"},
+    )
+    evidence = client.get(
+        f"/v1/kyc/sessions/{session['session_id']}/evidence", headers=bearer
+    ).json()
+    assert len(evidence["artifacts"]) >= 1
+    first = evidence["artifacts"][0]
+    assert first["kind"] and first["sha256"] and first["purged"] is False
+
+    blob = client.get(
+        f"/v1/kyc/sessions/{session['session_id']}/artifacts/{first['artifact_id']}",
+        headers=bearer,
+    )
+    assert blob.status_code == 200
+    assert len(blob.content) == first["size_bytes"]
+
+    # Another tenant's artifact id is rejected.
+    other = client.get(
+        "/v1/kyc/sessions/NONEXISTENT/artifacts/x", headers=bearer
+    )
+    assert other.status_code in (404, 401)
+
+
+def test_return_url_rejects_non_http() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas import SessionCreateRequest
+
+    with pytest.raises(ValidationError):
+        SessionCreateRequest(flow="TRAVEL_INSURANCE", return_url="javascript:alert(1)")

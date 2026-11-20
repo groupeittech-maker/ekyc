@@ -50,6 +50,10 @@ class SessionCreateRequest(BaseModel):
     # by the tenant — NOT the document's country. Falls back to the tenant's
     # default jurisdiction, then the platform default.
     jurisdiction: str | None = None
+    # Where the hosted UI sends the user once the flow reaches a terminal
+    # state (deep link back into the tenant app). http(s) only — anything
+    # else would let a tenant inject javascript: links into the hosted page.
+    return_url: str | None = Field(default=None, pattern=r"^https?://")
 
 
 class SessionCreateResponse(BaseModel):
@@ -70,9 +74,36 @@ class SessionResultResponse(BaseModel):
     checks: dict[str, str]
     reasons: list[str]
     identity: dict[str, Any] | None
+    # Per-check detail for the tenant's manual review (score, provider,
+    # reason) — filtered scalars only, no engine internals.
+    check_details: dict[str, Any] = Field(default_factory=dict)
     risk_score: float | None = None
     created_at: datetime
     completed_at: datetime | None
+
+
+class EvidenceArtifactResponse(BaseModel):
+    artifact_id: str
+    kind: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    created_at: datetime
+    purged: bool
+
+
+class SessionEvidenceResponse(BaseModel):
+    """Tenant-facing evidence bundle for manual review: what was submitted,
+    how each check scored, and where the binary proofs live."""
+    session_id: str
+    customer_reference: str | None
+    status: str
+    checks: dict[str, str]
+    check_details: dict[str, Any]
+    reasons: list[str]
+    identity: dict[str, Any] | None
+    risk_score: float | None = None
+    artifacts: list[EvidenceArtifactResponse]
 
 
 class SessionContextResponse(BaseModel):
@@ -89,6 +120,8 @@ class SessionContextResponse(BaseModel):
     otp_destination: str | None = None
     # Server-side consent policy version the UI must submit.
     consent_policy_version: str = "v1"
+    # Tenant deep link offered on the final screen (set at session creation).
+    return_url: str | None = None
     expires_at: datetime
 
 
