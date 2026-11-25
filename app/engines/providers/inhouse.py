@@ -365,6 +365,8 @@ class InHouseOcrProvider(OcrProvider):
         if doc_number:
             signals["viz_doc_number_present"] = doc_number in raw
         return signals
+
+    def _ela_signals(self, image: bytes) -> dict[str, float]:
         """Error Level Analysis: high residual on a re-saved JPEG can reveal editing.
 
         Returns a low score (0..1) when the image is very likely a re-saved or
