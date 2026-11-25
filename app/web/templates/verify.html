@@ -55,6 +55,7 @@
     .retry-hint { background: #fff4e5; color: #8a5300; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
     .tip { background: #eafaf6; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #0d6b5c; margin-bottom: 12px; }
     .return-link { display: block; width: 100%; padding: 13px; font-size: 16px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 700; text-align: center; text-decoration: none; min-height: 50px; box-sizing: border-box; margin-bottom: 12px; }
+    .return-link--secondary { background: #eef1f4; color: var(--ink); font-weight: 600; }
     footer { text-align: center; margin-top: 26px; }
     footer img, footer .mark { color: var(--muted); font-size: 12px; }
   </style>
@@ -158,6 +159,7 @@
     <ul class="checks" id="checks"></ul>
     <p class="status">Statut : <span id="status">-</span></p>
     <p class="muted">Aucun document biometrique n'est transmis au commercant.</p>
+    <a id="return-link-bottom" class="return-link return-link--secondary" hidden>Retour a l'application</a>
   </section>
 </main>
 
@@ -182,8 +184,19 @@ function cleanUrl() {
   }
 }
 
+const TOKEN_STORE_KEY = `trusdy_tok_${sessionId}`;
+
 async function resolveToken() {
-  if (token) { cleanUrl(); return; }
+  // Le token est retire de l'URL mais conserve en sessionStorage : un rechargement
+  // d'onglet (frequence sur mobile) ne doit pas transformer le parcours en impasse.
+  if (!token) {
+    try { token = sessionStorage.getItem(TOKEN_STORE_KEY); } catch (_) { /* storage indisponible */ }
+  }
+  if (token) {
+    try { sessionStorage.setItem(TOKEN_STORE_KEY, token); } catch (_) { /* idem */ }
+    cleanUrl();
+    return;
+  }
   if (!transferCode) throw new Error("Lien de verification invalide");
   const response = await fetch(api("/transfer/exchange"), {
     method: "POST",
@@ -346,6 +359,13 @@ async function bootstrap() {
   consentRequired = !!(context.consent && context.consent.required);
   consentGiven = !!(context.consent && context.consent.given);
   returnUrl = context.return_url || null;
+  // Lien de retour permanent sous la carte de statut : visible a toute etape,
+  // pas seulement en fin de parcours — l'utilisateur peut quitter le flux
+  // meme si la session reste IN_PROGRESS.
+  if (returnUrl) {
+    $("return-link-bottom").href = returnUrl;
+    $("return-link-bottom").hidden = false;
+  }
   consentPolicyVersion = context.consent_policy_version || "v1";
   $("donate-row").hidden = !(context.consent && context.consent.donate_offered);
   $("flow-label").textContent = context.flow_label;
