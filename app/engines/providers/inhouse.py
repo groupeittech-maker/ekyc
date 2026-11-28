@@ -285,29 +285,58 @@ class InHouseOcrProvider(OcrProvider):
         engine = _CvEngine.instance()
         img = engine.decode(image)
         gray = engine.cv2.cvtColor(img, engine.cv2.COLOR_BGR2GRAY)
-        binary, _ = self._preprocess_for_mrz(gray)
+        binary, enhanced = self._preprocess_for_mrz(gray)
 
         # Constrain Tesseract to the MRZ character set and line layout.
-        tesseract_config = (
-            "--psm 6 -c tessedit_char_whitelist=" "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
-        )
-        text = pytesseract.image_to_string(Image.fromarray(binary), config=tesseract_config)
+        whitelist = "-c tessedit_char_whitelist=" "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
+        # Laminated-card glare and phone-camera compression defeat any single
+        # preprocessing — a genuine document was wrongly declared unreadable.
+        # Try several (variant, layout) combinations and keep the first MRZ.
+        variants = [binary, enhanced]
+        try:
+            # Adaptive threshold copes with uneven lighting/shadows where
+            # Otsu's global level fails; inverted captures white-on-dark reads.
+            adaptive = engine.cv2.adaptiveThreshold(
+                enhanced, 255, engine.cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                engine.cv2.THRESH_BINARY, 31, 10,
+            )
+            variants.append(adaptive)
+        except Exception:
+            pass
+        variants.append(gray)
+
+        texts: list[str] = []
+        for variant in variants:
+            for psm in (6, 4):
+                config = f"--psm {psm} {whitelist}"
+                try:
+                    text = pytesseract.image_to_string(
+                        Image.fromarray(variant), config=config
+                    )
+                except Exception:
+                    continue
+                texts.append(text)
+                mrz = find_mrz(text)
+                if mrz:
+                    return mrz, "\n".join(t for t in texts if t)
+        # Last resort: original image, unconstrained layout.
+        text = pytesseract.image_to_string(Image.open(io.BytesIO(image)))
+        texts.append(text)
         mrz = find_mrz(text)
-        if not mrz:
-            # Fallback: try the original image with a more permissive layout.
-            text = pytesseract.image_to_string(Image.open(io.BytesIO(image)))
-            mrz = find_mrz(text)
-        return mrz, text
+        return mrz, "\n".join(t for t in texts if t)
 
     def extract(self, image: bytes, document_type: str) -> OcrResult:
         mrz, text = self._read_mrz(image)
         if mrz:
             fields = parse_mrz(mrz)
             fields["document_type"] = document_type
+            # Read-quality confidence follows the lenient check evaluation:
+            # a single corrected OCR slip still reflects a good read.
+            lenient = fields.get("checks_lenient", fields["checks_passed"])
             return OcrResult(
                 fields=fields,
                 raw_text=text,
-                confidence=0.95 if fields["checks_passed"] else 0.4,
+                confidence=0.95 if lenient else 0.4,
                 provider=self.name,
             )
         return OcrResult(fields={}, raw_text=text, confidence=0.0, provider=self.name)
@@ -415,28 +444,48 @@ class InHouseOcrProvider(OcrProvider):
         # VIZ cross-check only helps when the reference text was searchable.
         viz_score = (sum(viz.values()) / len(viz)) if viz else 0.5
 
+        # Graded MRZ evidence: strict pass = 1.0 per check, single-OCR-error
+        # correction = 0.7, failure = 0 — the checksum noise of laminated-card
+        # photography must not zero the evidence of a genuine document.
+        checks_score = float(ocr.fields.get("checks_score") or (1.0 if mrz_ok else 0.0))
+        checks_lenient = bool(ocr.fields.get("checks_lenient", mrz_ok))
+
         signals: dict[str, Any] = {
             "sharpness": round(sharpness, 2),
             "portrait_detected": bool(len(faces) > 0),
             "mrz_checks_passed": mrz_ok,
+            "mrz_checks_lenient": checks_lenient,
+            "mrz_checks_score": round(checks_score, 4),
             "mrz_checks": ocr.fields.get("checks"),
+            "mrz_checks_detail": ocr.fields.get("checks_detail"),
             **viz,
             **ela,
             **moire,
         }
-        # Weighted, explainable evidence — MRZ check digits alone no longer
+        # Weighted, explainable evidence — MRZ check digits alone never
         # suffice: they are computable by a forger, so the printed zone and
         # screen/capture signals must corroborate.
-        confidence = (
-            (0.40 if mrz_ok else 0.0)
-            + (0.20 if len(faces) > 0 else 0.0)
+        mrz_credit = 0.40 * checks_score
+        corroboration = (
+            (0.20 if len(faces) > 0 else 0.0)
             + 0.15 * viz_score
             + 0.15 * ela["ela_score"]
             + 0.10 * moire["moire_score"]
         )
-        # A parsed MRZ whose check digits FAIL is a red flag (either OCR noise
-        # or a hand-typed fake) — it can never look authentic on its own.
-        if mrz_found and not mrz_ok:
+        if mrz_found:
+            confidence = mrz_credit + corroboration
+        else:
+            # No MRZ read (glare, blur, or a document type without one — e.g.
+            # driving licence). Before, the ceiling was 0.525 < 0.6: genuine
+            # documents could NEVER pass, whatever their quality. The
+            # corroborating signals are rescaled to a 0.75 ceiling instead:
+            # a clean genuine capture passes, a weak one still fails.
+            confidence = corroboration * (0.75 / 0.60)
+        # A parsed MRZ where NOT ONE check digit validates — even with OCR
+        # correction — is a red flag (hand-typed fake): it caps the score.
+        # Partial validation is absorbed by the graded credit above instead
+        # of the former hard cap that rejected genuine noisy reads.
+        if mrz_found and checks_score == 0.0:
             confidence = min(confidence, 0.4)
         # A strong moiré pattern caps the score: likely a photo of a screen.
         if moire["moire_peaks"] >= 40:

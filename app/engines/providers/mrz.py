@@ -35,6 +35,47 @@ def check_digit(value: str) -> str:
     return str(total % 10)
 
 
+# Confusions OCR les plus fréquentes dans la zone MRZ (police OCR-B sur carte
+# plastifiée : reflets, compression). Ordre pertinent pour la correction.
+_OCR_CONFUSABLES: dict[str, str] = {
+    "0": "ODQ", "O": "0DQ", "D": "0O", "Q": "0O",
+    "1": "IL", "I": "1L", "L": "1I",
+    "5": "S", "S": "5",
+    "8": "B", "B": "8",
+    "2": "Z", "Z": "2",
+    "6": "G", "G": "6",
+}
+
+
+def tolerant_check(field: str, digit: str) -> str:
+    """Validate a check digit with OCR-error correction.
+
+    ICAO 9303 check digits protect against transcription noise — but the
+    noise here comes from the OCR itself: a single misread character inside
+    the protected field (or the digit) fails the checksum of a perfectly
+    genuine document. Industry practice is single-error correction before
+    declaring failure.
+
+    Returns ``"pass"`` (clean), ``"corrected"`` (valid after fixing one
+    OCR-confusable character) or ``"fail"``. A corrected pass is still real
+    evidence — a forger gains nothing: their data must be one OCR-confusable
+    character away from check-valid either way.
+    """
+    if check_digit(field) == digit:
+        return "pass"
+    # One confusable character inside the protected field. Correcting the
+    # digit itself would be vacuous — exactly one digit is valid for any
+    # field, so every mismatch would pass as « corrected » and the check
+    # would certify nothing. Field correction is meaningful in coding-theory
+    # terms: most single-error neighbourhoods are invalid, so a successful
+    # correction is real evidence of a near-clean read.
+    for index, char in enumerate(field):
+        for replacement in _OCR_CONFUSABLES.get(char, ""):
+            if check_digit(field[:index] + replacement + field[index + 1 :]) == digit:
+                return "corrected"
+    return "fail"
+
+
 def _parse_date(value: str, pivot: int = 30) -> str | None:
     if not re.fullmatch(r"\d{6}", value):
         return None
@@ -53,6 +94,26 @@ def _parse_names(zone: str) -> tuple[str, str]:
     return surname, given
 
 
+def _check_details(field_digits: dict[str, tuple[str, str]]) -> dict[str, Any]:
+    """Evaluate every check with OCR tolerance and derive aggregate scores.
+
+    ``field_digits`` maps check name -> (protected field, check digit).
+    """
+    detail = {name: tolerant_check(field, digit) for name, (field, digit) in field_digits.items()}
+    strict = {name: verdict == "pass" for name, verdict in detail.items()}
+    # pass = 1.0, corrected = 0.7 (real evidence, slightly discounted), fail = 0
+    score = sum({"pass": 1.0, "corrected": 0.7, "fail": 0.0}[v] for v in detail.values()) / max(
+        len(detail), 1
+    )
+    return {
+        "checks": strict,
+        "checks_passed": all(strict.values()),
+        "checks_detail": detail,
+        "checks_lenient": all(v != "fail" for v in detail.values()),
+        "checks_score": round(score, 4),
+    }
+
+
 def _fields(
     *,
     mrz_format: str,
@@ -65,6 +126,7 @@ def _fields(
     sex: str,
     expiry_date: str | None,
     checks: dict[str, bool],
+    check_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "mrz_format": mrz_format,
@@ -78,6 +140,7 @@ def _fields(
         "expiry_date": expiry_date,
         "checks": checks,
         "checks_passed": all(checks.values()),
+        **(check_meta or {}),
     }
 
 
@@ -90,12 +153,14 @@ def parse_td3(line1: str, line2: str) -> dict[str, Any]:
     birth_date_raw = line2[13:19]
     expiry_raw = line2[21:27]
 
-    checks = {
-        "document_number": check_digit(line2[0:9]) == line2[9],
-        "birth_date": check_digit(birth_date_raw) == line2[19],
-        "expiry_date": check_digit(expiry_raw) == line2[27],
-        "composite": check_digit(line2[0:10] + line2[13:20] + line2[21:43]) == line2[43],
-    }
+    meta = _check_details({
+        "document_number": (line2[0:9], line2[9]),
+        "birth_date": (birth_date_raw, line2[19]),
+        "expiry_date": (expiry_raw, line2[27]),
+        "composite": (line2[0:10] + line2[13:20] + line2[21:43], line2[43]),
+    })
+    checks = meta.pop("checks")
+    meta.pop("checks_passed")
 
     return _fields(
         mrz_format="TD3",
@@ -108,6 +173,7 @@ def parse_td3(line1: str, line2: str) -> dict[str, Any]:
         sex=line2[20].replace(_FILLER, ""),
         expiry_date=_parse_date(expiry_raw, pivot=99),
         checks=checks,
+        check_meta=meta,
     )
 
 
@@ -121,13 +187,14 @@ def parse_td1(line1: str, line2: str, line3: str) -> dict[str, Any]:
     birth_date_raw = line2[0:6]
     expiry_raw = line2[8:14]
 
-    checks = {
-        "document_number": check_digit(line1[5:14]) == line1[14],
-        "birth_date": check_digit(birth_date_raw) == line2[6],
-        "expiry_date": check_digit(expiry_raw) == line2[14],
-        "composite": check_digit(line1[5:30] + line2[0:7] + line2[8:15] + line2[18:29])
-        == line2[29],
-    }
+    meta = _check_details({
+        "document_number": (line1[5:14], line1[14]),
+        "birth_date": (birth_date_raw, line2[6]),
+        "expiry_date": (expiry_raw, line2[14]),
+        "composite": (line1[5:30] + line2[0:7] + line2[8:15] + line2[18:29], line2[29]),
+    })
+    checks = meta.pop("checks")
+    meta.pop("checks_passed")
 
     return _fields(
         mrz_format="TD1",
@@ -140,6 +207,7 @@ def parse_td1(line1: str, line2: str, line3: str) -> dict[str, Any]:
         sex=line2[7].replace(_FILLER, ""),
         expiry_date=_parse_date(expiry_raw, pivot=99),
         checks=checks,
+        check_meta=meta,
     )
 
 
@@ -152,12 +220,14 @@ def parse_td2(line1: str, line2: str) -> dict[str, Any]:
     birth_date_raw = line2[13:19]
     expiry_raw = line2[21:27]
 
-    checks = {
-        "document_number": check_digit(line2[0:9]) == line2[9],
-        "birth_date": check_digit(birth_date_raw) == line2[19],
-        "expiry_date": check_digit(expiry_raw) == line2[27],
-        "composite": check_digit(line2[0:10] + line2[13:20] + line2[21:35]) == line2[35],
-    }
+    meta = _check_details({
+        "document_number": (line2[0:9], line2[9]),
+        "birth_date": (birth_date_raw, line2[19]),
+        "expiry_date": (expiry_raw, line2[27]),
+        "composite": (line2[0:10] + line2[13:20] + line2[21:35], line2[35]),
+    })
+    checks = meta.pop("checks")
+    meta.pop("checks_passed")
 
     return _fields(
         mrz_format="TD2",
@@ -170,6 +240,7 @@ def parse_td2(line1: str, line2: str) -> dict[str, Any]:
         sex=line2[20].replace(_FILLER, ""),
         expiry_date=_parse_date(expiry_raw, pivot=99),
         checks=checks,
+        check_meta=meta,
     )
 
 

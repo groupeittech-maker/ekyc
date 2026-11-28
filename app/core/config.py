@@ -131,7 +131,14 @@ class Settings(BaseSettings):
     tsa_url: str = ""  # RFC 3161 Timestamp Authority; empty -> local soft timestamp
     tsa_qualified_certificates: bool = False  # only final KYC certificate uses paid TSA
 
-    face_match_threshold: float = 0.80
+    # Normalized-score pass bar for face matching. The score maps the SFace
+    # cosine similarity through face_match_cos_reject/accept; 0.37 corresponds
+    # to cosine ≈ 0.36 — the OpenCV Zoo same-person reference. The former 0.80
+    # (cosine ≈ 0.49) rejected genuine users en masse: document portraits are
+    # small, compressed and often years old, so genuine pairs typically score
+    # 0.35–0.48. Impersonation stays blocked — different-person cosines sit
+    # below 0.25 — and liveness/anti-spoof gates the capture upstream.
+    face_match_threshold: float = 0.37
     liveness_threshold: float = 0.70
     document_review_threshold: float = 0.60
     # Bounded recapture: quality-related failures return RETRY while the user
